@@ -114,7 +114,9 @@ function renderPage(container, user) {
 
 /**
  * Eine Aktion für alle Konten, nicht je Kalender: jeder Kalender mit
- * Standard-Zuweisung füllt seine eigenen, noch unzugewiesenen Termine. Die
+ * Standard-Zuweisung füllt seine eigenen, noch unzugewiesenen Termine und
+ * holt Termine zurück, die vor #1306 aus einem anderen Kalender desselben
+ * Kontos zu ihm umgezogen sind (#1307). Die
  * Zahl kommt vor der Rückfrage vom Server, weil sich die Aktion nur Termin
  * für Termin zurücknehmen lässt. Die Rückfrage steht AUSSERHALB von withBusy:
  * sonst gäbe der Dialog den Fokus an einen deaktivierten Knopf zurück.

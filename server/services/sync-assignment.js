@@ -106,6 +106,26 @@ const NOT_PUSHED_OUTBOUND = `
       (SELECT applied_at FROM schema_migrations WHERE version = 47), ''))
 `;
 
+// --------------------------------------------------------
+// UNANGETASTET: die Zuweisung ist GENAU eine Person `who` - eine Menge mit einem
+// Element in `event_assignments`, und `assigned_to` leer oder dieselbe (so sah
+// eine Zeile aus, deren Spalte beim Import schon belegt war; assignDefaultToEvent
+// schreibt sie nur, wenn sie NULL ist). Dazu nicht hinausgepusht.
+//
+// EINE Regel fuer ZWEI Stellen: der Umzug zur Laufzeit (#1270,
+// reassignDefaultOnCalendarMove) und das Nachholen alter Umzuege (#1307,
+// MOVED_DEFAULT_EVENTS). `who` ist ein SQL-Ausdruck - ein Parameter bei der
+// einen, eine Spalte bei der anderen - und steht dreimal im Fragment. Der
+// Alias `e` wie bei NOT_PUSHED_OUTBOUND.
+// --------------------------------------------------------
+
+const UNTOUCHED_DEFAULT_ASSIGNMENT = (who) => `
+  ${NOT_PUSHED_OUTBOUND}
+    AND (e.assigned_to IS NULL OR e.assigned_to = ${who})
+    AND EXISTS (SELECT 1 FROM event_assignments ua WHERE ua.event_id = e.id AND ua.user_id = ${who})
+    AND NOT EXISTS (SELECT 1 FROM event_assignments ub WHERE ub.event_id = e.id AND ub.user_id <> ${who})
+`;
+
 const UNASSIGNED_MAPPED_EVENTS = `
   FROM calendar_events e
   JOIN external_calendars ec ON ec.id = e.calendar_ref_id
@@ -116,6 +136,80 @@ const UNASSIGNED_MAPPED_EVENTS = `
     AND NOT EXISTS (SELECT 1 FROM event_assignments ea WHERE ea.event_id = e.id)
 `;
 
+// --------------------------------------------------------
+// Alte Umzuege nachholen (#1307).
+//
+// Der Umzug zur Laufzeit (#1270) sieht nur einen Umzug, der WAEHREND eines Syncs
+// passiert: `calendar_ref_id` wechselt von A nach B. Ein Termin, der vor diesem
+// Fix umgezogen ist, liegt laengst in B und traegt noch die Standard-Person von
+// A - der Wechsel kommt nie wieder, und mit ihm auch nicht die Korrektur.
+//
+// Dieselbe Aktion wie das Nachtragen (#1154) nimmt ihn mit, mit derselben
+// Rueckfrage, derselben Bestaetigung ueber die Menge (#1171) und in denselben
+// Happen. Kandidat ist ein Termin in B, dessen Zuweisung die UNANGETASTETE
+// Standard-Person eines anderen Kalenders A ist - dieselbe Regel wie beim Umzug
+// (UNTOUCHED_DEFAULT_ASSIGNMENT). A ist dabei nicht bekannt, nur moeglich; deshalb:
+//   - A liegt beim selben Anbieter und, bei CalDAV, im selben Konto (ueber
+//     caldav_calendar_selection): nur dort kann ein Termin mit derselben
+//     Identitaet umziehen. Google und Apple fuehren je ein Konto.
+//   - B hat eine Standard-Person, und sie ist eine andere: wie beim Umzug nimmt
+//     ein Kalender ohne Standard-Person nichts weg.
+//   - ZUSAETZLICH `user_modified = 0`. Der Umzug zur Laufzeit hat den Wechsel
+//     gesehen; hier fehlt dieser Beleg, und "genau die Person von A" kann auch
+//     eine Hand sein, die einen Termin in B bewusst dieser Person gegeben hat.
+//     Jede Bearbeitung in Yuvomi - auch die Zuweisung - setzt `user_modified`
+//     an einem externen Termin (routes/calendar/crud.js, PUT), und der Inbound
+//     setzt es nie zurueck. Ein so bearbeiteter Termin bleibt stehen; die
+//     sichere Richtung.
+//
+// Ein verknuepftes Vorkommen einer Serie ist eine lokale Zeile ohne
+// calendar_ref_id: es erbt die Zuweisung vom Master und zieht mit ihm um; fuehrt
+// es sie selbst, war schon eine Hand daran, und es bleibt, wie es ist.
+// --------------------------------------------------------
+
+const MOVED_DEFAULT_EVENTS = `
+  FROM calendar_events e
+  JOIN external_calendars ec ON ec.id = e.calendar_ref_id
+  JOIN users u ON u.id = ec.default_assignee_user_id
+  JOIN event_assignments cur ON cur.event_id = e.id
+  WHERE e.external_source = ec.source
+    AND e.user_modified = 0
+    AND cur.user_id <> ec.default_assignee_user_id
+    AND ${UNTOUCHED_DEFAULT_ASSIGNMENT('cur.user_id')}
+    AND EXISTS (
+      SELECT 1 FROM external_calendars eca
+      WHERE eca.source = ec.source
+        AND eca.id <> ec.id
+        AND eca.default_assignee_user_id = cur.user_id
+        AND (ec.source <> 'caldav' OR EXISTS (
+          SELECT 1 FROM caldav_calendar_selection sa
+          JOIN caldav_calendar_selection sb ON sb.account_id = sa.account_id
+          WHERE sa.calendar_url = eca.external_id AND sb.calendar_url = ec.external_id
+        ))
+    )
+`;
+
+/**
+ * Stellt eine unangetastete Standard-Zuweisung auf eine andere Person um - der
+ * eine Schreibweg fuer den Umzug zur Laufzeit (#1270) und das Nachholen (#1307).
+ * Ueber setEventAssignments() (Erinnerungen, Anhangrechte); geerbte
+ * Erinnerungen, deren Zeit vorbei ist, gelten als verworfen.
+ *
+ * @param {object} d better-sqlite3 Datenbank-Handle
+ * @param {number} eventId
+ * @param {number} toUserId
+ * @param {string} nowKey remindAtCompareKey(jetzt)
+ */
+function moveDefaultAssignment(d, eventId, toUserId, nowKey) {
+  d.prepare('UPDATE calendar_events SET assigned_to = ? WHERE id = ?').run(toUserId, eventId);
+  setEventAssignments(d, eventId, [toUserId]);
+  d.prepare(`
+    UPDATE reminders SET dismissed = 1
+    WHERE entity_type = 'event' AND entity_id = ? AND created_by = ?
+      AND assigned_from IS NOT NULL AND ${remindAtUtcSql('remind_at')} <= ?
+  `).run(eventId, toUserId, nowKey);
+}
+
 const BACKFILL_BATCH_SIZE = 50;
 
 /**
@@ -124,12 +218,21 @@ const BACKFILL_BATCH_SIZE = 50;
  * Liste an applyDefaultAssigneesToExisting() weiter.
  *
  * @param {object} d better-sqlite3 Datenbank-Handle
- * @returns {{ eventId: number, userId: number }[]}
+ * Zwei Arten: ein Termin ohne Zuweisung (#1154) und ein vor #1306 umgezogener
+ * Termin, der noch die Person seines alten Kalenders traegt (#1307) - er fuehrt
+ * zusaetzlich `fromUserId`, die Person, die er verliert.
+ *
+ * @returns {{ eventId: number, userId: number, fromUserId?: number }[]}
  */
 export function listBackfillCandidates(d) {
-  return d.prepare(
-    `SELECT e.id AS eventId, ec.default_assignee_user_id AS userId ${UNASSIGNED_MAPPED_EVENTS} ORDER BY e.id`
+  const unassigned = d.prepare(
+    `SELECT e.id AS eventId, ec.default_assignee_user_id AS userId ${UNASSIGNED_MAPPED_EVENTS}`
   ).all();
+  const moved = d.prepare(
+    `SELECT e.id AS eventId, ec.default_assignee_user_id AS userId, cur.user_id AS fromUserId ${MOVED_DEFAULT_EVENTS}`
+  ).all();
+  // Die beiden Mengen schliessen sich aus (keine Zuweisung / genau eine).
+  return [...unassigned, ...moved].sort((a, b) => a.eventId - b.eventId);
 }
 
 /**
@@ -143,12 +246,18 @@ export function listBackfillCandidates(d) {
  * Rückfrage gezählt hat. Die Liste kommt nach Termin-ID sortiert, der
  * Fingerabdruck ist also für dieselbe Menge immer derselbe.
  *
- * @param {{ eventId: number, userId: number }[]} candidates
+ * @param {{ eventId: number, userId: number, fromUserId?: number }[]} candidates
  * @returns {string} SHA-256, hex
  */
 export function backfillCandidatesToken(candidates) {
   const hash = createHash('sha256');
-  for (const { eventId, userId } of candidates) hash.update(`${eventId}:${userId};`);
+  // Ein umzustellender Termin nennt auch die Person, die er verliert: wird ein
+  // leerer Termin inzwischen von Hand jemandem zugewiesen, ist er zwar weiter
+  // Kandidat fuer dieselbe Person, bestaetigt war aber ein Fuellen, kein
+  // Umstellen (#1307).
+  for (const { eventId, userId, fromUserId } of candidates) {
+    hash.update(fromUserId == null ? `${eventId}:${userId};` : `${eventId}:${userId}:${fromUserId};`);
+  }
   return hash.digest('hex');
 }
 
@@ -218,12 +327,25 @@ export async function applyDefaultAssigneesToExisting(
       AND assigned_from IS NOT NULL AND ${remindAtUtcSql('remind_at')} <= ?
   `);
 
+  const stillMoved = d.prepare(`
+    SELECT ec.default_assignee_user_id AS userId, cur.user_id AS fromUserId
+    ${MOVED_DEFAULT_EVENTS}
+      AND e.id = ?
+  `);
+
   let assigned = 0;
   for (let start = 0; start < candidates.length; start += batchSize) {
     const batch = candidates.slice(start, start + batchSize);
     assigned += d.transaction(() => {
       let written = 0;
-      for (const { eventId, userId } of batch) {
+      for (const { eventId, userId, fromUserId } of batch) {
+        if (fromUserId != null) {
+          const moved = stillMoved.get(eventId);
+          if (!moved || moved.userId !== userId || moved.fromUserId !== fromUserId) continue;
+          moveDefaultAssignment(d, eventId, userId, nowKey);
+          written += 1;
+          continue;
+        }
         const row = stillEligible.get(eventId);
         if (!row || row.userId !== userId) continue;
         setPrimary.run(userId, eventId);
@@ -326,41 +448,25 @@ export function reassignDefaultOnCalendarMove(
   if (Number(fromCalRefId) === Number(toCalRefId)) return false;
   if (!toDefaultUserId) return false;
 
-  // An einem hinausgepushten Termin war schon eine Hand: seine Zuweisung ist
-  // eine Aussage eines Menschen, auch wenn sie dieselbe Person nennt wie der
-  // Kalender, in dem er liegt.
-  const notPushedOut = d.prepare(
-    `SELECT 1 FROM calendar_events e WHERE e.id = ? AND ${NOT_PUSHED_OUTBOUND}`
-  ).get(eventId);
-  if (!notPushedOut) return false;
-
   const fromDefault = d.prepare(
     'SELECT default_assignee_user_id FROM external_calendars WHERE id = ?'
   ).get(fromCalRefId)?.default_assignee_user_id ?? null;
   if (!fromDefault) return false;
   if (Number(fromDefault) === Number(toDefaultUserId)) return false;
 
-  // GENAU die Standard-Person von A - in beiden Spalten, die eine Zuweisung
-  // fuehren. `assigned_to` darf leer sein: so sah eine Zeile aus, deren Spalte
-  // beim Import schon belegt war (assignDefaultToEvent schreibt sie nur, wenn
-  // sie NULL ist).
-  const assigned = d.prepare('SELECT user_id FROM event_assignments WHERE event_id = ?')
-    .all(eventId).map((r) => Number(r.user_id));
-  if (assigned.length !== 1 || assigned[0] !== Number(fromDefault)) return false;
-  const primary = d.prepare('SELECT assigned_to FROM calendar_events WHERE id = ?')
-    .get(eventId)?.assigned_to ?? null;
-  if (primary != null && Number(primary) !== Number(fromDefault)) return false;
+  // GENAU die unangetastete Standard-Person von A, und nicht hinausgepusht: an
+  // einem hinausgepushten Termin war schon eine Hand, auch wenn er dieselbe
+  // Person nennt wie der Kalender, in dem er liegt. Dieselbe Regel wie beim
+  // Nachholen alter Umzuege (#1307).
+  const untouched = d.prepare(
+    `SELECT 1 FROM calendar_events e WHERE e.id = @eventId AND ${UNTOUCHED_DEFAULT_ASSIGNMENT('@fromUser')}`
+  ).get({ eventId, fromUser: Number(fromDefault) });
+  if (!untouched) return false;
 
   // Verwaiste Referenz (Nutzer gelöscht) still ignorieren, wie in
   // assignDefaultToEvent.
   if (!d.prepare('SELECT 1 FROM users WHERE id = ?').get(toDefaultUserId)) return false;
 
-  d.prepare('UPDATE calendar_events SET assigned_to = ? WHERE id = ?').run(toDefaultUserId, eventId);
-  setEventAssignments(d, eventId, [toDefaultUserId]);
-  d.prepare(`
-    UPDATE reminders SET dismissed = 1
-    WHERE entity_type = 'event' AND entity_id = ? AND created_by = ?
-      AND assigned_from IS NOT NULL AND ${remindAtUtcSql('remind_at')} <= ?
-  `).run(eventId, toDefaultUserId, remindAtCompareKey(now));
+  moveDefaultAssignment(d, eventId, toDefaultUserId, remindAtCompareKey(now));
   return true;
 }

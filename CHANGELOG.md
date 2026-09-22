@@ -137,6 +137,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Appointments moved to another calendar before 2.68.0 can now take that calendar's person.**
+  Since 2.68.0 an appointment moved between two calendars of one account takes the new calendar's
+  default assignee along, and with it the colour. Appointments moved before that kept the person of
+  the calendar they came from, and nothing ever changed that, because the move itself was long
+  over. "Apply to existing appointments" under Settings > Sync now includes them: an appointment
+  whose only assignee is still the default assignee of another calendar of the same account gets
+  the default assignee of the calendar it is in now. The count in the confirmation includes them,
+  and the confirmation still covers exactly the appointments it counted. An appointment edited in
+  Yuvomi, assigned to more than one person or to anyone else, created in Yuvomi and sent to the
+  calendar, or in a calendar without a default assignee stays as it is. For a recurring
+  appointment the whole series changes, including occurrences edited on their own that do not
+  have their own assignment. (#1307)
+
 - **Deleting a folder no longer reveals activity on documents you cannot see.** Before deleting a
   folder the app asks the server what the deletion would affect and sends that answer back with the
   deletion, so nothing changes unnoticed in between. That answer was built over every document in

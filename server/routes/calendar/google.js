@@ -231,7 +231,9 @@ router.patch('/external-calendars', requireAdmin, (req, res) => {
 /**
  * GET /api/v1/calendar/external-calendars/default-assignee-backfill
  * Admin only. Zählt, wie viele bereits importierte Termine das Nachtragen der
- * Standard-Zuweisung füllen würde (#1154) - die Zahl steht in der Rückfrage.
+ * Standard-Zuweisung füllen würde (#1154), dazu vor #1306 umgezogene Termine,
+ * die noch die Person ihres alten Kalenders tragen (#1307) - die Zahl steht in
+ * der Rückfrage.
  * Das Token ist der Fingerabdruck genau dieser Menge (#1171) und geht mit der
  * Bestätigung zurück.
  * Response: { data: { count, token } }
@@ -250,7 +252,9 @@ router.get('/external-calendars/default-assignee-backfill', requireAdmin, (req, 
  * POST /api/v1/calendar/external-calendars/default-assignee-backfill
  * Admin only. Wendet die Standard-Zuweisung jedes Kalenders aller Konten auf
  * seine schon importierten Termine an, die noch niemandem zugewiesen sind
- * (#1154). Eine vorhandene Zuweisung bleibt unangetastet.
+ * (#1154). Eine vorhandene Zuweisung bleibt unangetastet - ausser der
+ * unangetasteten Standard-Person eines anderen Kalenders desselben Kontos an
+ * einem umgezogenen Termin (#1307, listBackfillCandidates).
  *
  * Die Rueckfrage hat eine Menge genannt, und nur diese Menge ist bestaetigt:
  * hat sie sich seither geaendert (jemand hat Zuweisungen entfernt, eine
