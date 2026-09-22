@@ -148,7 +148,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Yuvomi, assigned to more than one person or to anyone else, created in Yuvomi and sent to the
   calendar, or in a calendar without a default assignee stays as it is. For a recurring
   appointment the whole series changes, including occurrences edited on their own that do not
-  have their own assignment. (#1307)
+  have their own assignment. The confirmation names the one case it cannot tell apart: an
+  appointment in a calendar whose default assignee was changed later, when the previous person is
+  the default assignee of another calendar of the same account, changes as well. (#1307)
 
 - **Deleting a folder no longer reveals activity on documents you cannot see.** Before deleting a
   folder the app asks the server what the deletion would affect and sends that answer back with the

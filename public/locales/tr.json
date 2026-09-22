@@ -2557,7 +2557,7 @@
             "backfillAction": "Mevcut randevulara uygula",
             "backfillQuestion": "{{count}} randevu atansın mı?",
             "backfillQuestion_one": "{{count}} randevu atansın mı?",
-            "backfillDetail": "Her randevu kendi takviminin varsayılan atamasını alır. Atamasını birinin elle kaldırdığı randevular da buna dahildir. Yalnızca randevu randevu geri alınabilir.",
+            "backfillDetail": "Her randevu kendi takviminin varsayılan atamasını alır. Atamasını birinin elle kaldırdığı randevular da buna dahildir. Varsayılan ataması sonradan değiştirilen bir takvimdeki randevular da, önceki kişi aynı hesaptaki başka bir takvimin varsayılan ataması ise buna dahildir. Yalnızca randevu randevu geri alınabilir.",
             "backfillConfirm": "Ata",
             "backfillNone": "Varsayılan atama uygulanacak randevu yok.",
             "backfillDone": "{{count}} randevu atandı.",

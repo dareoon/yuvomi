@@ -2557,7 +2557,7 @@
             "backfillAction": "Áp dụng cho lịch hẹn hiện có",
             "backfillQuestion": "Giao {{count}} lịch hẹn?",
             "backfillQuestion_one": "Giao {{count}} lịch hẹn?",
-            "backfillDetail": "Mỗi lịch hẹn nhận người được giao mặc định của lịch chứa nó. Điều này bao gồm cả các lịch hẹn mà ai đó đã gỡ người được giao theo cách thủ công. Chỉ có thể hoàn tác từng lịch hẹn một.",
+            "backfillDetail": "Mỗi lịch hẹn nhận người được giao mặc định của lịch chứa nó. Điều này bao gồm cả các lịch hẹn mà ai đó đã gỡ người được giao theo cách thủ công. Điều này cũng bao gồm các lịch hẹn trong một lịch có người được giao mặc định đã được đổi sau đó, nếu người trước đó là người được giao mặc định của một lịch khác trong cùng tài khoản. Chỉ có thể hoàn tác từng lịch hẹn một.",
             "backfillConfirm": "Giao",
             "backfillNone": "Không có lịch hẹn nào để áp dụng người được giao mặc định.",
             "backfillDone": "Đã giao {{count}} lịch hẹn.",

@@ -2580,7 +2580,7 @@
             "backfillAction": "Apply to existing appointments",
             "backfillQuestion": "Assign {{count}} appointments?",
             "backfillQuestion_one": "Assign {{count}} appointment?",
-            "backfillDetail": "Each appointment gets the default assignee of its calendar. This includes appointments whose assignment someone removed by hand. It can only be undone one appointment at a time.",
+            "backfillDetail": "Each appointment gets the default assignee of its calendar. This includes appointments whose assignment someone removed by hand. It also includes appointments in a calendar whose default assignee was changed later, if the previous person is the default assignee of another calendar of the same account. It can only be undone one appointment at a time.",
             "backfillConfirm": "Assign",
             "backfillNone": "There are no appointments to apply a default assignee to.",
             "backfillDone": "{{count}} appointments assigned.",

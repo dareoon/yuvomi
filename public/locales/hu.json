@@ -2557,7 +2557,7 @@
             "backfillAction": "Alkalmazás a meglévő időpontokra",
             "backfillQuestion": "Hozzárendel {{count}} időpontot?",
             "backfillQuestion_one": "Hozzárendel {{count}} időpontot?",
-            "backfillDetail": "Minden időpont megkapja a naptára alapértelmezett hozzárendelését. Ez azokra az időpontokra is vonatkozik, amelyekről valaki kézzel eltávolította a hozzárendelést. Visszavonni csak időpontonként lehet.",
+            "backfillDetail": "Minden időpont megkapja a naptára alapértelmezett hozzárendelését. Ez azokra az időpontokra is vonatkozik, amelyekről valaki kézzel eltávolította a hozzárendelést. Azokra az időpontokra is vonatkozik, amelyek naptárának alapértelmezett hozzárendelését később módosították, ha a korábbi személy ugyanazon fiók egy másik naptárának alapértelmezett hozzárendelése. Visszavonni csak időpontonként lehet.",
             "backfillConfirm": "Hozzárendelés",
             "backfillNone": "Nincs olyan időpont, amelyre alapértelmezett hozzárendelést lehetne alkalmazni.",
             "backfillDone": "{{count}} időpont hozzárendelve.",

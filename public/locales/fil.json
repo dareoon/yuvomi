@@ -2592,7 +2592,7 @@
             "backfillAction": "Ilapat sa mga kasalukuyang appointment",
             "backfillQuestion": "Iatas ang {{count}} na appointment?",
             "backfillQuestion_one": "Iatas ang {{count}} na appointment?",
-            "backfillDetail": "Ang bawat appointment ay tatanggap ng default na naaatasan ng kalendaryo nito. Kasama rito ang mga appointment na ang pag-aatas ay inalis nang manwal ng isang tao. Maaari itong bawiin nang isa-isa na appointment.",
+            "backfillDetail": "Ang bawat appointment ay tatanggap ng default na naaatasan ng kalendaryo nito. Kasama rito ang mga appointment na ang pag-aatas ay inalis nang manwal ng isang tao. Kasama rin ang mga appointment sa kalendaryong binago kalaunan ang default na naaatasan, kung ang dating tao ay ang default na naaatasan ng ibang kalendaryo sa parehong account. Maaari itong bawiin nang isa-isa na appointment.",
             "backfillConfirm": "Iatas",
             "backfillNone": "Walang appointment na mapaglalapatan ng default na naaatasan.",
             "backfillDone": "{{count}} na appointment ang inatasan.",

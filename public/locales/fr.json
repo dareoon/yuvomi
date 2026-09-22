@@ -2557,7 +2557,7 @@
             "backfillAction": "Appliquer aux rendez-vous existants",
             "backfillQuestion": "Attribuer {{count}} rendez-vous ?",
             "backfillQuestion_one": "Attribuer {{count}} rendez-vous ?",
-            "backfillDetail": "Chaque rendez-vous reçoit l’attribution par défaut de son calendrier. Cela inclut les rendez-vous dont quelqu’un a retiré l’attribution à la main. L’annulation ne se fait que rendez-vous par rendez-vous.",
+            "backfillDetail": "Chaque rendez-vous reçoit l’attribution par défaut de son calendrier. Cela inclut les rendez-vous dont quelqu’un a retiré l’attribution à la main. Cela inclut aussi les rendez-vous d’un calendrier dont l’attribution par défaut a été modifiée ensuite, si la personne précédente est l’attribution par défaut d’un autre calendrier du même compte. L’annulation ne se fait que rendez-vous par rendez-vous.",
             "backfillConfirm": "Attribuer",
             "backfillNone": "Aucun rendez-vous auquel appliquer une attribution par défaut.",
             "backfillDone": "{{count}} rendez-vous attribués.",

@@ -2569,7 +2569,7 @@
             "backfillAction": "Terapkan ke janji temu yang ada",
             "backfillQuestion": "Tugaskan {{count}} janji temu?",
             "backfillQuestion_one": "Tugaskan {{count}} janji temu?",
-            "backfillDetail": "Setiap janji temu mendapat penerima tugas default dari kalendernya. Ini termasuk janji temu yang penugasannya dihapus secara manual oleh seseorang. Hanya bisa dibatalkan satu per satu.",
+            "backfillDetail": "Setiap janji temu mendapat penerima tugas default dari kalendernya. Ini termasuk janji temu yang penugasannya dihapus secara manual oleh seseorang. Ini juga mencakup janji temu di kalender yang penerima tugas default-nya diubah kemudian, jika orang sebelumnya adalah penerima tugas default kalender lain di akun yang sama. Hanya bisa dibatalkan satu per satu.",
             "backfillConfirm": "Tugaskan",
             "backfillNone": "Tidak ada janji temu yang perlu diberi penerima tugas default.",
             "backfillDone": "{{count}} janji temu ditugaskan.",

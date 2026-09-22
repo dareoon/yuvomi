@@ -2557,7 +2557,7 @@
             "backfillAction": "Aplicar aos compromissos existentes",
             "backfillQuestion": "Atribuir {{count}} compromissos?",
             "backfillQuestion_one": "Atribuir {{count}} compromisso?",
-            "backfillDetail": "Cada compromisso recebe a atribuição padrão do seu calendário. Isso inclui compromissos cuja atribuição alguém removeu manualmente. Só é possível desfazer compromisso por compromisso.",
+            "backfillDetail": "Cada compromisso recebe a atribuição padrão do seu calendário. Isso inclui compromissos cuja atribuição alguém removeu manualmente. Também inclui compromissos de um calendário cuja atribuição padrão foi alterada depois, se a pessoa anterior for a atribuição padrão de outro calendário da mesma conta. Só é possível desfazer compromisso por compromisso.",
             "backfillConfirm": "Atribuir",
             "backfillNone": "Não há compromissos aos quais aplicar uma atribuição padrão.",
             "backfillDone": "{{count}} compromissos atribuídos.",

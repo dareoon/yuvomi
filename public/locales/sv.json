@@ -2557,7 +2557,7 @@
             "backfillAction": "Tillämpa på befintliga möten",
             "backfillQuestion": "Tilldela {{count}} möten?",
             "backfillQuestion_one": "Tilldela {{count}} möte?",
-            "backfillDetail": "Varje möte får standardtilldelningen för sin kalender. Det gäller även möten där någon tagit bort tilldelningen för hand. Det går bara att ångra ett möte i taget.",
+            "backfillDetail": "Varje möte får standardtilldelningen för sin kalender. Det gäller även möten där någon tagit bort tilldelningen för hand. Det gäller även möten i en kalender vars standardtilldelning ändrades senare, om den tidigare personen är standardtilldelning för en annan kalender i samma konto. Det går bara att ångra ett möte i taget.",
             "backfillConfirm": "Tilldela",
             "backfillNone": "Det finns inga möten att tillämpa en standardtilldelning på.",
             "backfillDone": "{{count}} möten tilldelade.",

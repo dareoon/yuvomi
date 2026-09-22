@@ -2557,7 +2557,7 @@
             "backfillAction": "Toepassen op bestaande afspraken",
             "backfillQuestion": "{{count}} afspraken toewijzen?",
             "backfillQuestion_one": "{{count}} afspraak toewijzen?",
-            "backfillDetail": "Elke afspraak krijgt de standaardtoewijzing van haar agenda. Dat geldt ook voor afspraken waarvan iemand de toewijzing met de hand heeft verwijderd. Terugdraaien kan alleen per afspraak.",
+            "backfillDetail": "Elke afspraak krijgt de standaardtoewijzing van haar agenda. Dat geldt ook voor afspraken waarvan iemand de toewijzing met de hand heeft verwijderd. Dat geldt ook voor afspraken in een agenda waarvan de standaardtoewijzing later is gewijzigd, als de vorige persoon de standaardtoewijzing van een andere agenda van hetzelfde account is. Terugdraaien kan alleen per afspraak.",
             "backfillConfirm": "Toewijzen",
             "backfillNone": "Er zijn geen afspraken om een standaardtoewijzing op toe te passen.",
             "backfillDone": "{{count}} afspraken toegewezen.",

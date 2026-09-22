@@ -2557,7 +2557,7 @@
             "backfillAction": "Použít na stávající události",
             "backfillQuestion": "Přiřadit {{count}} událostí?",
             "backfillQuestion_one": "Přiřadit {{count}} událost?",
-            "backfillDetail": "Každá událost dostane výchozí přiřazení svého kalendáře. Týká se to i událostí, u kterých někdo přiřazení ručně odebral. Vrátit to lze jen událost po události.",
+            "backfillDetail": "Každá událost dostane výchozí přiřazení svého kalendáře. Týká se to i událostí, u kterých někdo přiřazení ručně odebral. Týká se to také událostí v kalendáři, jehož výchozí přiřazení bylo později změněno, pokud je dřívější osoba výchozím přiřazením jiného kalendáře téhož účtu. Vrátit to lze jen událost po události.",
             "backfillConfirm": "Přiřadit",
             "backfillNone": "Nejsou žádné události, na které by se dalo použít výchozí přiřazení.",
             "backfillDone": "Přiřazeno {{count}} událostí.",

@@ -162,6 +162,14 @@ const UNASSIGNED_MAPPED_EVENTS = `
 //     setzt es nie zurueck. Ein so bearbeiteter Termin bleibt stehen; die
 //     sichere Richtung.
 //
+// WAS DIE REGEL NICHT SIEHT: einen geaenderten Kalender statt eines umgezogenen
+// Termins. Stellt ein Admin die Standard-Person von B von X auf Y um, und X ist
+// die Standard-Person eines anderen Kalenders desselben Kontos, sehen die
+// frueher importierten Termine von B genau so aus wie umgezogene - eine Spur des
+// Import-Kalenders gibt es nicht. Sie bekommen dann Y. Die Rueckfrage sagt das
+// (settings.sync.backfillDetail), wie sie die von Hand entfernte Zuweisung des
+// Nachtragens nennt.
+//
 // Ein verknuepftes Vorkommen einer Serie ist eine lokale Zeile ohne
 // calendar_ref_id: es erbt die Zuweisung vom Master und zieht mit ihm um; fuehrt
 // es sie selbst, war schon eine Hand daran, und es bleibt, wie es ist.

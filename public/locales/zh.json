@@ -2557,7 +2557,7 @@
             "backfillAction": "应用到现有日程",
             "backfillQuestion": "分配 {{count}} 个日程？",
             "backfillQuestion_one": "分配 {{count}} 个日程？",
-            "backfillDetail": "每个日程都会获得其所属日历的默认分配。这也包括有人手动移除了分配的日程。只能逐个日程撤销。",
+            "backfillDetail": "每个日程都会获得其所属日历的默认分配。这也包括有人手动移除了分配的日程。默认分配后来被更改的日历中的日程，如果之前的人是同一账户中另一个日历的默认分配，也包括在内。只能逐个日程撤销。",
             "backfillConfirm": "分配",
             "backfillNone": "没有需要应用默认分配的日程。",
             "backfillDone": "已分配 {{count}} 个日程。",

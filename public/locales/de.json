@@ -2592,7 +2592,7 @@
             "backfillAction": "Auf bestehende Termine anwenden",
             "backfillQuestion": "{{count}} Termine zuweisen?",
             "backfillQuestion_one": "{{count}} Termin zuweisen?",
-            "backfillDetail": "Jeder Termin bekommt die Standard-Zuweisung seines Kalenders. Das trifft auch Termine, bei denen jemand die Zuweisung von Hand entfernt hat. Zurücknehmen lässt es sich nur Termin für Termin.",
+            "backfillDetail": "Jeder Termin bekommt die Standard-Zuweisung seines Kalenders. Das trifft auch Termine, bei denen jemand die Zuweisung von Hand entfernt hat. Ebenso Termine in einem Kalender, dessen Standard-Zuweisung später geändert wurde, wenn die frühere Person die Standard-Zuweisung eines anderen Kalenders desselben Kontos ist. Zurücknehmen lässt es sich nur Termin für Termin.",
             "backfillConfirm": "Zuweisen",
             "backfillNone": "Es gibt keine Termine, auf die eine Standard-Zuweisung anzuwenden ist.",
             "backfillDone": "{{count}} Termine zugewiesen.",

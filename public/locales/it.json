@@ -2557,7 +2557,7 @@
             "backfillAction": "Applica agli appuntamenti esistenti",
             "backfillQuestion": "Assegnare {{count}} appuntamenti?",
             "backfillQuestion_one": "Assegnare {{count}} appuntamento?",
-            "backfillDetail": "Ogni appuntamento riceve l’assegnazione predefinita del suo calendario. Questo include gli appuntamenti la cui assegnazione è stata rimossa a mano. Si può annullare solo un appuntamento alla volta.",
+            "backfillDetail": "Ogni appuntamento riceve l’assegnazione predefinita del suo calendario. Questo include gli appuntamenti la cui assegnazione è stata rimossa a mano. Include anche gli appuntamenti di un calendario la cui assegnazione predefinita è stata cambiata in seguito, se la persona precedente è l’assegnazione predefinita di un altro calendario dello stesso account. Si può annullare solo un appuntamento alla volta.",
             "backfillConfirm": "Assegna",
             "backfillNone": "Non ci sono appuntamenti a cui applicare un’assegnazione predefinita.",
             "backfillDone": "{{count}} appuntamenti assegnati.",

@@ -2569,7 +2569,7 @@
             "backfillAction": "Zastosuj do istniejących terminów",
             "backfillQuestion": "Przypisać {{count}} terminów?",
             "backfillQuestion_one": "Przypisać {{count}} termin?",
-            "backfillDetail": "Każdy termin otrzyma domyślne przypisanie swojego kalendarza. Dotyczy to także terminów, z których ktoś ręcznie usunął przypisanie. Cofnąć można to tylko termin po terminie.",
+            "backfillDetail": "Każdy termin otrzyma domyślne przypisanie swojego kalendarza. Dotyczy to także terminów, z których ktoś ręcznie usunął przypisanie. Dotyczy to też terminów w kalendarzu, którego domyślne przypisanie zmieniono później, jeśli poprzednia osoba jest domyślnym przypisaniem innego kalendarza tego samego konta. Cofnąć można to tylko termin po terminie.",
             "backfillConfirm": "Przypisz",
             "backfillNone": "Nie ma terminów, do których można zastosować domyślne przypisanie.",
             "backfillDone": "Przypisano {{count}} terminów.",
