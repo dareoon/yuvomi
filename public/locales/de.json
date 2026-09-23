@@ -46,6 +46,7 @@
         "errorForbidden": "Zugriff verweigert. Bitte erneut anmelden.",
         "errorNotFound": "Der Eintrag wurde nicht gefunden.",
         "errorServer": "Serverfehler. Bitte versuche es später erneut.",
+        "errorRestoreInProgress": "Gerade wird ein Backup wiederhergestellt. Deine Änderung wurde nicht gespeichert, versuche es in einer Minute erneut.",
         "errorTimeout": "Die Verbindung hat zu lange gedauert. Bitte erneut versuchen.",
         "requiredFields": "Bitte alle Pflichtfelder ausfüllen.",
         "invalidInput": "Ungültige Eingabe.",
@@ -61,7 +62,8 @@
             "hint": "Legt fest, wer diesen Eintrag in Yuvomi sieht.",
             "assigneesNobodyHint": "Ohne Zuweisung sieht diesen Eintrag nur du."
         },
-        "toShoppingListNamed": "{{title}} auf die Einkaufsliste setzen"
+        "toShoppingListNamed": "{{title}} auf die Einkaufsliste setzen",
+        "emailInUse": "Diese E-Mail-Adresse gehört bereits zu einem anderen Konto."
     },
     "kitchen": {
         "noShoppingLists": "Es gibt noch keine Einkaufsliste.",
@@ -753,6 +755,8 @@
         "searchCountCapped": "{{shown}} von {{total}} Treffern",
         "title": "Kalender",
         "attachmentRemove": "Anhang entfernen",
+        "attachmentChangeRefused": "Diesen Anhang kannst du nicht ändern: Das Dokument ist privat, oder dir fehlt das Recht auf Dokumente.",
+        "attachmentUploadRefused": "Einen Anhang hinzufügen darf nur, wer Dokumente bearbeiten darf.",
         "newEvent": "Neuer Termin",
         "editEvent": "Termin bearbeiten",
         "addEvent": "Termin hinzufügen",
@@ -1136,6 +1140,7 @@
         "phonePreview": "Vorschau: {{value}}",
         "phoneImplausible": "Diese Nummer wirkt unvollständig - sie wird trotzdem gespeichert.",
         "emailLabel": "E-Mail",
+        "emailLockedHint": "Diese Adressen gehören zum Konto dieses Mitglieds. Ändern können sie nur die Person selbst oder ein Admin.",
         "emailPlaceholder": "name@beispiel.de",
         "addressLabel": "Adresse",
         "addressPlaceholder": "Straße, PLZ Ort",
@@ -2194,6 +2199,7 @@
         "cardavErrorDuplicate": "Ein Konto mit dieser Adresse und diesem Benutzernamen ist schon verbunden.",
         "cardavErrorAccountNotFound": "Dieses Konto gibt es nicht mehr. Lade die Seite neu.",
         "cardavErrorAddressbookNotFound": "Dieses Adressbuch gibt es nicht mehr. Aktualisiere die Adressbücher.",
+        "cardavErrorPasswordRequired": "Für einen anderen Server oder Benutzernamen gib das Passwort erneut ein.",
         "syncPartiallyFailed": "Zuletzt mit Fehlern",
         "syncErrorDetail": "Letzter Lauf: {{error}}",
         "cardavEditAccount": "CardDAV-Konto bearbeiten",
@@ -2590,16 +2596,24 @@
             "defaultAssigneeHint": "Neu synchronisierte Termine werden automatisch dieser Person zugewiesen.",
             "defaultAssigneeRoutingHint": "Standard-Zuweisung: Termine aus einem Kalender bekommen die dort gewählte Person, und ein neuer Termin, der nur dieser Person zugewiesen ist, wird in diesem Kalender angelegt. Das gilt für Google- und CalDAV-Kalender, nicht für Apple oder Outlook.",
             "backfillTitle": "Zuweisung nachtragen",
-            "backfillDescription": "Eine Standard-Zuweisung gilt nur für Termine, die nach dem Setzen übernommen werden. Hier lässt sie sich einmalig auf die schon übernommenen Termine aller Konten anwenden. Termine, die bereits jemandem zugewiesen sind, bleiben unverändert.",
+            "backfillDescription": "Eine Standard-Zuweisung gilt nur für Termine, die nach dem Setzen übernommen werden. Hier lässt sie sich einmalig auf die schon übernommenen Termine aller Konten anwenden. Termine ohne Zuweisung bekommen sie direkt. Termine, die noch die Standard-Zuweisung eines anderen Kalenders tragen, stehen einzeln zur Auswahl. Jede andere Zuweisung bleibt unverändert.",
             "backfillAction": "Auf bestehende Termine anwenden",
             "backfillQuestion": "{{count}} Termine ohne Zuweisung zuweisen?",
             "backfillQuestion_one": "{{count}} Termin ohne Zuweisung zuweisen?",
             "backfillDetail": "Jeder Termin bekommt die Standard-Zuweisung seines Kalenders. Das trifft auch Termine, bei denen jemand die Zuweisung von Hand entfernt hat. Zurücknehmen lässt es sich nur Termin für Termin.",
             "backfillConfirm": "Zuweisen",
-            "backfillNone": "Es gibt keine Termine ohne Zuweisung in Kalendern mit Standard-Zuweisung.",
+            "backfillNone": "Es gibt keine Termine, auf die eine Standard-Zuweisung anzuwenden ist.",
             "backfillDone": "{{count}} Termine zugewiesen.",
             "backfillDone_one": "{{count}} Termin zugewiesen.",
-            "backfillChanged": "Seit der Zählung haben sich Termine geändert. Bitte noch einmal anwenden."
+            "backfillChanged": "Seit der Zählung haben sich Termine geändert. Bitte noch einmal anwenden.",
+            "backfillFillCount": "{{count}} Termine ohne Zuweisung",
+            "backfillFillCount_one": "{{count}} Termin ohne Zuweisung",
+            "backfillMovedTitle": "Termine mit der Standard-Zuweisung eines anderen Kalenders",
+            "backfillMovedHint": "Diese Termine tragen noch die Standard-Zuweisung eines anderen Kalenders desselben Kontos. Das kann ein verschobener Termin sein oder ein Kalender, dessen Standard-Zuweisung später geändert wurde. Umgestellt werden nur die ausgewählten Termine, die anderen bleiben, wie sie sind.",
+            "backfillMovedPartial": "Termine {{first}} bis {{last}} von {{total}}. „Zuweisen“ übernimmt die Auswahl auf dieser Seite, „Nächste anzeigen“ blättert ohne Übernehmen weiter. Nicht ausgewählte Termine bleiben unverändert.",
+            "backfillMovedNext": "Nächste anzeigen",
+            "backfillMovedAll": "Alle auswählen",
+            "backfillMovedChange": "Von {{from}} zu {{to}}"
         },
         "calendarDefaultsTitle": "Standardwerte für neue Termine",
         "calendarDefaultsDescription": "Voreinstellungen, die neue Termine automatisch übernehmen.",
@@ -2796,6 +2810,9 @@
         "backupRestoreErrorKeyInvalid": "Der Schlüssel kam beim Server nicht lesbar an. Gib ihn erneut ein und stelle noch einmal wieder her. Hier wurde nichts geändert.",
         "backupRestoreErrorOwnKeyMissing": "Diese Installation hat keinen DB_ENCRYPTION_KEY und kann das Backup deshalb nicht öffnen. Setze DB_ENCRYPTION_KEY, starte Yuvomi neu und stelle dann mit dem Schlüssel des Backups wieder her.",
         "backupRestoreErrorDamaged": "Das Backup ist beschädigt oder unvollständig, der Schlüssel stimmt. Hol die Datei erneut, vergleiche Größe und sha256sum mit dem Original und stelle diese Kopie wieder her. Hier wurde nichts geändert.",
+        "backupRestoreErrorCorrupt": "Das Backup ist beschädigt oder unvollständig. Hol die Datei erneut, vergleiche Größe und sha256sum mit dem Original und stelle diese Kopie wieder her oder nimm ein älteres Backup. Hier wurde nichts geändert.",
+        "backupRestoreErrorInProgress": "Auf dieser Installation läuft gerade schon eine Wiederherstellung. Warte, bis sie fertig ist, und prüfe dann, welches Backup eingespielt ist, bevor du erneut wiederherstellst. Diese Anfrage hat nichts geändert.",
+        "backupRestoreErrorBusy": "Yuvomi ist gerade noch beschäftigt, etwa mit einem Abgleich oder einem Backup, deshalb hat die Wiederherstellung nicht begonnen. Hier wurde nichts geändert. Versuche es gleich noch einmal.",
         "backupRestoreErrorUnreadable": "Das Backup ließ sich nicht lesen. Prüfe, ob die Datei vollständig ist, und versuche es erneut; die genaue Ursache steht im Server-Log. Hier wurde nichts geändert.",
         "backupRestoreErrorGeneric": "Die Wiederherstellung ist fehlgeschlagen. Die genaue Ursache steht im Server-Log.",
         "backupRestoreErrorNeverEncrypted": "Wurde die Datei nie verschlüsselt, ist sie keine gültige Yuvomi-Datenbank.",
@@ -2828,6 +2845,8 @@
         "orDivider": "oder",
         "ssoError": "SSO-Anmeldung fehlgeschlagen. Bitte erneut versuchen.",
         "ssoNoAccount": "Für diese SSO-Anmeldung gibt es hier noch kein Konto. Wende dich an die Administration deines Haushalts.",
+        "ssoEmailAmbiguous": "Deine E-Mail-Adresse steht hier an mehreren Konten, deshalb kann die SSO-Anmeldung keinem davon zugeordnet werden. Wende dich an die Administration deines Haushalts.",
+        "ssoLinkRequired": "Zu deiner E-Mail-Adresse gibt es hier schon ein Konto mit Passwort. Melde dich damit an und verknüpfe SSO unter Einstellungen → Konto, oder wende dich an die Administration deines Haushalts.",
         "forgotPassword": "Passwort vergessen?",
         "networkError": "Verbindung fehlgeschlagen. Prüfe, ob der Server läuft, und versuche es erneut.",
         "capsLockWarning": "Feststelltaste (Caps Lock) ist aktiv.",
@@ -3582,8 +3601,7 @@
         "currentMonth": "Aktuell",
         "noVisitReportsInMonth": "Im {{month}} wurden keine Einsätze erfasst.",
         "settledAdminOnly": "Ändern oder löschen nur durch einen Admin",
-        "reportVisitsCount": "Besuche",
-        "receiptPresent": "Vorhanden"
+        "reportVisitsCount": "Besuche"
     },
     "splitExpenses": {
         "title": "Gemeinsame Ausgaben",
@@ -3682,7 +3700,8 @@
             "recurring_paused": "Wiederkehrende Ausgabe pausiert",
             "recurring_resumed": "Wiederkehrende Ausgabe fortgesetzt",
             "recurring_generated": "Wiederkehrende Ausgabe erzeugt",
-            "payment_reversed": "Zahlung storniert"
+            "payment_reversed": "Zahlung storniert",
+            "ledger_restored": "Buchung wiederhergestellt"
         },
         "splitPercentage": "Prozent",
         "splitExact": "Exakter Betrag",
@@ -5484,7 +5503,7 @@
         "openAction": "{{name}} öffnen",
         "limitReached": "Höchstens {{count}} Dokumente möglich.",
         "limitReached_one": "Höchstens {{count}} Dokument möglich.",
-        "presentHidden": "Vorhanden"
+        "lockedPrivate": "Anhang vorhanden (privat)"
     },
     "join": {
         "title": "Konto einrichten",

@@ -46,6 +46,7 @@
         "errorForbidden": "Từ chối truy cập. Vui lòng đăng nhập lại.",
         "errorNotFound": "Không tìm thấy mục nhập.",
         "errorServer": "Lỗi máy chủ. Vui lòng thử lại sau.",
+        "errorRestoreInProgress": "Một bản sao lưu đang được khôi phục. Thay đổi của bạn chưa được lưu, hãy thử lại sau một phút.",
         "errorTimeout": "Kết nối quá lâu. Vui lòng thử lại.",
         "requiredFields": "Vui lòng điền tất cả các trường bắt buộc.",
         "invalidInput": "Đầu vào không hợp lệ.",
@@ -61,7 +62,8 @@
             "hint": "Kiểm soát ai có thể xem mục này trong Yuvomi.",
             "assigneesNobodyHint": "Nếu không giao cho ai, chỉ bạn thấy mục này."
         },
-        "toShoppingListNamed": "Thêm {{title}} vào danh sách mua sắm"
+        "toShoppingListNamed": "Thêm {{title}} vào danh sách mua sắm",
+        "emailInUse": "Địa chỉ email này đã thuộc về một tài khoản khác."
     },
     "kitchen": {
         "noShoppingLists": "Chưa có danh sách mua sắm.",
@@ -741,6 +743,8 @@
         "searchCountCapped": "{{shown}} trên {{total}} kết quả",
         "title": "Lịch",
         "attachmentRemove": "Xóa tệp đính kèm",
+        "attachmentChangeRefused": "Bạn không thể thay đổi tệp đính kèm này: tài liệu là riêng tư hoặc bạn không có quyền truy cập tài liệu.",
+        "attachmentUploadRefused": "Chỉ người được phép chỉnh sửa tài liệu mới có thể thêm tệp đính kèm.",
         "newEvent": "Sự kiện mới",
         "editEvent": "Sửa sự kiện",
         "addEvent": "Thêm sự kiện",
@@ -1123,6 +1127,7 @@
         "phonePreview": "Xem trước: {{value}}",
         "phoneImplausible": "Số này có vẻ chưa đầy đủ - nó vẫn sẽ được lưu.",
         "emailLabel": "Email",
+        "emailLockedHint": "Các địa chỉ này thuộc về tài khoản của thành viên này. Chỉ chính thành viên đó hoặc quản trị viên mới có thể thay đổi.",
         "emailPlaceholder": "name@example.com",
         "addressLabel": "Địa chỉ",
         "addressPlaceholder": "Đường, Mã bưu điện Thành phố",
@@ -2112,6 +2117,7 @@
         "cardavErrorDuplicate": "Đã có tài khoản kết nối với địa chỉ và tên đăng nhập này.",
         "cardavErrorAccountNotFound": "Tài khoản này không còn tồn tại. Hãy tải lại trang.",
         "cardavErrorAddressbookNotFound": "Sổ địa chỉ này không còn tồn tại. Hãy làm mới danh sách sổ địa chỉ.",
+        "cardavErrorPasswordRequired": "Máy chủ hoặc tên người dùng khác cần nhập lại mật khẩu.",
         "syncPartiallyFailed": "Lần chạy gần nhất có lỗi",
         "syncErrorDetail": "Lần chạy gần nhất: {{error}}",
         "cardavEditAccount": "Sửa tài khoản CardDAV",
@@ -2555,16 +2561,24 @@
             "defaultAssigneeHint": "Các sự kiện mới đồng bộ sẽ tự động được giao cho người này.",
             "defaultAssigneeRoutingHint": "Người được giao mặc định: sự kiện từ một lịch được giao cho người đã chọn ở đó, và sự kiện mới chỉ giao cho người đó sẽ được tạo trong lịch ấy. Áp dụng cho lịch Google và CalDAV, không áp dụng cho Apple hay Outlook.",
             "backfillTitle": "Bổ sung người được giao",
-            "backfillDescription": "Người được giao mặc định chỉ áp dụng cho các lịch hẹn được nhập sau khi thiết lập. Tại đây bạn có thể áp dụng một lần cho các lịch hẹn đã được nhập từ tất cả tài khoản. Các lịch hẹn đã được giao cho ai đó sẽ giữ nguyên.",
+            "backfillDescription": "Người được giao mặc định chỉ áp dụng cho các lịch hẹn được nhập sau khi thiết lập. Tại đây bạn có thể áp dụng một lần cho các lịch hẹn đã được nhập từ tất cả tài khoản. Các lịch hẹn chưa có người được giao sẽ nhận trực tiếp. Các lịch hẹn vẫn mang người được giao mặc định của lịch khác được liệt kê từng mục để bạn chọn. Mọi việc giao khác sẽ giữ nguyên.",
             "backfillAction": "Áp dụng cho lịch hẹn hiện có",
             "backfillQuestion": "Giao {{count}} lịch hẹn chưa có người được giao?",
             "backfillQuestion_one": "Giao {{count}} lịch hẹn chưa có người được giao?",
             "backfillDetail": "Mỗi lịch hẹn nhận người được giao mặc định của lịch chứa nó. Điều này bao gồm cả các lịch hẹn mà ai đó đã gỡ người được giao theo cách thủ công. Chỉ có thể hoàn tác từng lịch hẹn một.",
             "backfillConfirm": "Giao",
-            "backfillNone": "Không có lịch hẹn nào chưa có người được giao trong các lịch có người được giao mặc định.",
+            "backfillNone": "Không có lịch hẹn nào để áp dụng người được giao mặc định.",
             "backfillDone": "Đã giao {{count}} lịch hẹn.",
             "backfillDone_one": "Đã giao {{count}} lịch hẹn.",
-            "backfillChanged": "Lịch hẹn đã thay đổi kể từ khi đếm. Vui lòng áp dụng lại."
+            "backfillChanged": "Lịch hẹn đã thay đổi kể từ khi đếm. Vui lòng áp dụng lại.",
+            "backfillFillCount": "{{count}} lịch hẹn chưa có người được giao",
+            "backfillFillCount_one": "{{count}} lịch hẹn chưa có người được giao",
+            "backfillMovedTitle": "Lịch hẹn mang người được giao mặc định của lịch khác",
+            "backfillMovedHint": "Các lịch hẹn này vẫn mang người được giao mặc định của một lịch khác trong cùng tài khoản. Đó có thể là lịch hẹn đã được chuyển, hoặc một lịch có người được giao mặc định đã được đổi sau đó. Chỉ các lịch hẹn được chọn mới thay đổi, các lịch hẹn khác giữ nguyên.",
+            "backfillMovedPartial": "Lịch hẹn {{first}} đến {{last}} trên {{total}}. “Giao” áp dụng lựa chọn trên trang này, “Hiện tiếp” chuyển tiếp mà không áp dụng. Các lịch hẹn không được chọn sẽ giữ nguyên.",
+            "backfillMovedNext": "Hiện tiếp",
+            "backfillMovedAll": "Chọn tất cả",
+            "backfillMovedChange": "Từ {{from}} sang {{to}}"
         },
         "calendarDefaultsTitle": "Mặc định cho sự kiện mới",
         "calendarDefaultsDescription": "Cài đặt sẵn tự động áp dụng cho sự kiện mới.",
@@ -2784,6 +2798,9 @@
         "backupRestoreErrorKeyInvalid": "Khóa không đến máy chủ ở dạng đọc được. Hãy nhập lại và khôi phục thêm lần nữa. Không có gì bị thay đổi ở đây.",
         "backupRestoreErrorOwnKeyMissing": "Bản cài đặt này không có DB_ENCRYPTION_KEY nên không mở được bản sao lưu. Hãy đặt DB_ENCRYPTION_KEY, khởi động lại Yuvomi rồi khôi phục bằng khóa của bản sao lưu.",
         "backupRestoreErrorDamaged": "Bản sao lưu bị hỏng hoặc không đầy đủ; khóa là đúng. Hãy lấy lại tệp, so sánh kích thước và sha256sum với bản gốc rồi khôi phục bản sao đó. Không có gì bị thay đổi ở đây.",
+        "backupRestoreErrorCorrupt": "Bản sao lưu bị hỏng hoặc không đầy đủ. Hãy lấy lại tệp, so sánh kích thước và sha256sum với bản gốc rồi khôi phục bản sao đó, hoặc dùng một bản sao lưu cũ hơn. Không có gì bị thay đổi ở đây.",
+        "backupRestoreErrorInProgress": "Một lần khôi phục đang chạy trên bản cài đặt này. Hãy đợi đến khi xong, rồi kiểm tra bản sao lưu nào đang được dùng trước khi khôi phục lại. Yêu cầu này không thay đổi gì.",
+        "backupRestoreErrorBusy": "Yuvomi vẫn đang bận, ví dụ với một lần đồng bộ hoặc sao lưu, nên việc khôi phục chưa bắt đầu. Không có gì bị thay đổi ở đây. Hãy thử lại sau giây lát.",
         "backupRestoreErrorUnreadable": "Không đọc được bản sao lưu. Hãy kiểm tra tệp có đầy đủ không rồi thử lại; nguyên nhân chính xác nằm trong nhật ký máy chủ. Không có gì bị thay đổi ở đây.",
         "backupRestoreErrorGeneric": "Khôi phục thất bại. Nguyên nhân chính xác nằm trong nhật ký máy chủ.",
         "backupRestoreErrorNeverEncrypted": "Nếu tệp chưa từng được mã hóa, đó không phải cơ sở dữ liệu Yuvomi hợp lệ.",
@@ -2816,6 +2833,8 @@
         "orDivider": "hoặc",
         "ssoError": "Đăng nhập SSO thất bại. Vui lòng thử lại.",
         "ssoNoAccount": "Chưa có tài khoản nào ở đây cho lần đăng nhập SSO này. Vui lòng liên hệ quản trị viên hộ gia đình của bạn.",
+        "ssoEmailAmbiguous": "Địa chỉ email của bạn thuộc về nhiều tài khoản ở đây, vì vậy không thể gán lần đăng nhập SSO cho tài khoản nào. Vui lòng liên hệ quản trị viên hộ gia đình của bạn.",
+        "ssoLinkRequired": "Ở đây đã có một tài khoản có mật khẩu cho địa chỉ email của bạn. Hãy đăng nhập bằng tài khoản đó và liên kết SSO trong Cài đặt → Tài khoản, hoặc liên hệ quản trị viên hộ gia đình của bạn.",
         "forgotPassword": "Quên mật khẩu?",
         "networkError": "Kết nối thất bại. Kiểm tra xem máy chủ có đang chạy không rồi thử lại.",
         "capsLockWarning": "Caps Lock đang bật.",
@@ -3578,8 +3597,7 @@
         "currentMonth": "Hiện tại",
         "noVisitReportsInMonth": "Không có lượt đến của nhân viên được ghi nhận trong {{month}}.",
         "settledAdminOnly": "Chỉ quản trị viên mới có thể sửa hoặc xoá",
-        "reportVisitsCount": "Số lượt đến",
-        "receiptPresent": "Đã đính kèm"
+        "reportVisitsCount": "Số lượt đến"
     },
     "userMultiSelect": {
         "moreUsers": "thêm",
@@ -3682,7 +3700,8 @@
             "recurring_paused": "Chi phí định kỳ bị tạm dừng",
             "recurring_resumed": "Chi phí định kỳ được tiếp tục",
             "recurring_generated": "Chi phí định kỳ được phát sinh",
-            "payment_reversed": "Đã hoàn tác thanh toán"
+            "payment_reversed": "Đã hoàn tác thanh toán",
+            "ledger_restored": "Đã khôi phục bút toán"
         },
         "splitPercentage": "Tỷ lệ phần trăm",
         "splitExact": "Số tiền chính xác",
@@ -5484,7 +5503,7 @@
         "openAction": "Mở {{name}}",
         "limitReached": "Tối đa {{count}} tài liệu.",
         "limitReached_one": "Tối đa {{count}} tài liệu.",
-        "presentHidden": "Đã đính kèm"
+        "lockedPrivate": "Có tệp đính kèm (riêng tư)"
     },
     "join": {
         "title": "Thiết lập tài khoản",

@@ -46,6 +46,7 @@
         "errorForbidden": "Toegang geweigerd. Meld u opnieuw aan.",
         "errorNotFound": "De vermelding is niet gevonden.",
         "errorServer": "Serverfout. Probeer het later opnieuw.",
+        "errorRestoreInProgress": "Er wordt nu een back-up hersteld. Je wijziging is niet opgeslagen, probeer het over een minuut opnieuw.",
         "errorTimeout": "De verbinding duurde te lang. Probeer het opnieuw.",
         "requiredFields": "Vul alle verplichte velden in.",
         "invalidInput": "Ongeldige invoer.",
@@ -61,7 +62,8 @@
             "hint": "Bepaalt wie dit item in Yuvomi kan zien.",
             "assigneesNobodyHint": "Zonder toewijzing zie alleen jij dit item."
         },
-        "toShoppingListNamed": "{{title}} op de boodschappenlijst zetten"
+        "toShoppingListNamed": "{{title}} op de boodschappenlijst zetten",
+        "emailInUse": "Dit e-mailadres hoort al bij een ander account."
     },
     "kitchen": {
         "noShoppingLists": "Er is nog geen boodschappenlijst.",
@@ -741,6 +743,8 @@
         "searchCountCapped": "{{shown}} van {{total}} resultaten",
         "title": "Agenda",
         "attachmentRemove": "Bijlage verwijderen",
+        "attachmentChangeRefused": "Je kunt deze bijlage niet wijzigen: het document is privé, of je hebt geen toegang tot documenten.",
+        "attachmentUploadRefused": "Alleen wie documenten mag bewerken, kan een bijlage toevoegen.",
         "newEvent": "Nieuw evenement",
         "editEvent": "Evenement bewerken",
         "addEvent": "Evenement toevoegen",
@@ -1123,6 +1127,7 @@
         "phonePreview": "Voorbeeld: {{value}}",
         "phoneImplausible": "Dit nummer lijkt onvolledig - het wordt toch opgeslagen.",
         "emailLabel": "E-mail",
+        "emailLockedHint": "Deze adressen horen bij het account van dit lid. Alleen het lid zelf of een beheerder kan ze wijzigen.",
         "emailPlaceholder": "naam@voorbeeld.nl",
         "addressLabel": "Adres",
         "addressPlaceholder": "Straat, postcode Plaats",
@@ -2135,6 +2140,7 @@
         "cardavErrorDuplicate": "Er is al een account met dit adres en deze gebruikersnaam verbonden.",
         "cardavErrorAccountNotFound": "Dit account bestaat niet meer. Herlaad de pagina.",
         "cardavErrorAddressbookNotFound": "Dit adresboek bestaat niet meer. Ververs de adresboeken.",
+        "cardavErrorPasswordRequired": "Voor een andere server of gebruikersnaam moet je het wachtwoord opnieuw invoeren.",
         "syncPartiallyFailed": "Laatste run met fouten",
         "syncErrorDetail": "Laatste run: {{error}}",
         "cardavEditAccount": "CardDAV-account bewerken",
@@ -2555,16 +2561,24 @@
             "defaultAssigneeHint": "Nieuw gesynchroniseerde afspraken worden automatisch aan deze persoon toegewezen.",
             "defaultAssigneeRoutingHint": "Standaardtoewijzing: afspraken uit een agenda krijgen de daar gekozen persoon, en een nieuwe afspraak die alleen aan die persoon is toegewezen, wordt in die agenda aangemaakt. Dit geldt voor Google- en CalDAV-agenda's, niet voor Apple of Outlook.",
             "backfillTitle": "Toewijzingen aanvullen",
-            "backfillDescription": "Een standaardtoewijzing geldt alleen voor afspraken die na het instellen zijn opgehaald. Hier kun je haar eenmalig toepassen op de afspraken die al uit alle accounts zijn opgehaald. Afspraken die al aan iemand zijn toegewezen, blijven ongewijzigd.",
+            "backfillDescription": "Een standaardtoewijzing geldt alleen voor afspraken die na het instellen zijn opgehaald. Hier kun je haar eenmalig toepassen op de afspraken die al uit alle accounts zijn opgehaald. Afspraken zonder toewijzing krijgen haar direct. Afspraken die nog de standaardtoewijzing van een andere agenda dragen, staan één voor één ter keuze. Elke andere toewijzing blijft ongewijzigd.",
             "backfillAction": "Toepassen op bestaande afspraken",
             "backfillQuestion": "{{count}} afspraken zonder toewijzing toewijzen?",
             "backfillQuestion_one": "{{count}} afspraak zonder toewijzing toewijzen?",
             "backfillDetail": "Elke afspraak krijgt de standaardtoewijzing van haar agenda. Dat geldt ook voor afspraken waarvan iemand de toewijzing met de hand heeft verwijderd. Terugdraaien kan alleen per afspraak.",
             "backfillConfirm": "Toewijzen",
-            "backfillNone": "Er zijn geen afspraken zonder toewijzing in agenda’s met een standaardtoewijzing.",
+            "backfillNone": "Er zijn geen afspraken om een standaardtoewijzing op toe te passen.",
             "backfillDone": "{{count}} afspraken toegewezen.",
             "backfillDone_one": "{{count}} afspraak toegewezen.",
-            "backfillChanged": "Afspraken zijn gewijzigd sinds het tellen. Pas het opnieuw toe."
+            "backfillChanged": "Afspraken zijn gewijzigd sinds het tellen. Pas het opnieuw toe.",
+            "backfillFillCount": "{{count}} afspraken zonder toewijzing",
+            "backfillFillCount_one": "{{count}} afspraak zonder toewijzing",
+            "backfillMovedTitle": "Afspraken met de standaardtoewijzing van een andere agenda",
+            "backfillMovedHint": "Deze afspraken dragen nog de standaardtoewijzing van een andere agenda van hetzelfde account. Dat kan een verplaatste afspraak zijn, of een agenda waarvan de standaardtoewijzing later is gewijzigd. Alleen de geselecteerde afspraken veranderen, de andere blijven zoals ze zijn.",
+            "backfillMovedPartial": "Afspraken {{first}} tot en met {{last}} van {{total}}. “Toewijzen” past de selectie op deze pagina toe, “Volgende tonen” gaat verder zonder toe te passen. Niet geselecteerde afspraken blijven ongewijzigd.",
+            "backfillMovedNext": "Volgende tonen",
+            "backfillMovedAll": "Alles selecteren",
+            "backfillMovedChange": "Van {{from}} naar {{to}}"
         },
         "calendarDefaultsTitle": "Standaardwaarden voor nieuwe afspraken",
         "calendarDefaultsDescription": "Voorinstellingen die automatisch op nieuwe afspraken worden toegepast.",
@@ -2784,6 +2798,9 @@
         "backupRestoreErrorKeyInvalid": "De sleutel kwam niet leesbaar bij de server aan. Voer hem opnieuw in en herstel nog een keer. Hier is niets gewijzigd.",
         "backupRestoreErrorOwnKeyMissing": "Deze installatie heeft geen DB_ENCRYPTION_KEY en kan de back-up daarom niet openen. Stel DB_ENCRYPTION_KEY in, start Yuvomi opnieuw en herstel daarna met de sleutel van de back-up.",
         "backupRestoreErrorDamaged": "De back-up is beschadigd of onvolledig; de sleutel klopt. Haal het bestand opnieuw op, vergelijk grootte en sha256sum met het origineel en herstel die kopie. Hier is niets gewijzigd.",
+        "backupRestoreErrorCorrupt": "De back-up is beschadigd of onvolledig. Haal het bestand opnieuw op, vergelijk grootte en sha256sum met het origineel en herstel die kopie, of gebruik een oudere back-up. Hier is niets gewijzigd.",
+        "backupRestoreErrorInProgress": "Op deze installatie loopt al een herstel. Wacht tot het klaar is en controleer welke back-up actief is voordat je opnieuw herstelt. Dit verzoek heeft niets gewijzigd.",
+        "backupRestoreErrorBusy": "Yuvomi is nog bezig, bijvoorbeeld met een synchronisatie of een back-up, daarom is het herstel niet begonnen. Hier is niets gewijzigd. Probeer het zo meteen opnieuw.",
         "backupRestoreErrorUnreadable": "De back-up kon niet worden gelezen. Controleer of het bestand volledig is en probeer het opnieuw; de precieze oorzaak staat in het serverlog. Hier is niets gewijzigd.",
         "backupRestoreErrorGeneric": "Het herstel is mislukt. De precieze oorzaak staat in het serverlog.",
         "backupRestoreErrorNeverEncrypted": "Is het bestand nooit versleuteld, dan is het geen geldige Yuvomi-database.",
@@ -2816,6 +2833,8 @@
         "orDivider": "of",
         "ssoError": "SSO-aanmelding mislukt. Probeer het opnieuw.",
         "ssoNoAccount": "Er is hier nog geen account voor deze SSO-aanmelding. Neem contact op met de beheerder van je huishouden.",
+        "ssoEmailAmbiguous": "Je e-mailadres hoort hier bij meer dan één account, daarom kan de SSO-aanmelding aan geen van beide worden gekoppeld. Neem contact op met de beheerder van je huishouden.",
+        "ssoLinkRequired": "Er bestaat hier al een account met wachtwoord voor je e-mailadres. Meld je daarmee aan en koppel SSO onder Instellingen → Account, of neem contact op met de beheerder van je huishouden.",
         "forgotPassword": "Wachtwoord vergeten?",
         "networkError": "Verbinding mislukt. Controleer of de server draait en probeer het opnieuw.",
         "capsLockWarning": "Caps Lock staat aan.",
@@ -3578,8 +3597,7 @@
         "currentMonth": "Huidig",
         "noVisitReportsInMonth": "Geen personeelsbezoeken vastgelegd in {{month}}.",
         "settledAdminOnly": "Alleen een beheerder kan dit wijzigen of verwijderen",
-        "reportVisitsCount": "Bezoeken",
-        "receiptPresent": "Aanwezig"
+        "reportVisitsCount": "Bezoeken"
     },
     "userMultiSelect": {
         "moreUsers": "meer",
@@ -3682,7 +3700,8 @@
             "recurring_paused": "Terugkerende uitgave gepauzeerd",
             "recurring_resumed": "Terugkerende uitgave hervat",
             "recurring_generated": "Terugkerende uitgave gegenereerd",
-            "payment_reversed": "Betaling tegengeboekt"
+            "payment_reversed": "Betaling tegengeboekt",
+            "ledger_restored": "Boeking hersteld"
         },
         "splitPercentage": "Percentage",
         "splitExact": "Exact bedrag",
@@ -5484,7 +5503,7 @@
         "openAction": "{{name}} openen",
         "limitReached": "Maximaal {{count}} documenten.",
         "limitReached_one": "Maximaal {{count}} document.",
-        "presentHidden": "Aanwezig"
+        "lockedPrivate": "Bijlage aanwezig (privé)"
     },
     "join": {
         "title": "Account instellen",

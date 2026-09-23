@@ -46,6 +46,7 @@
         "errorForbidden": "Přístup odepřen. Přihlaste se prosím znovu.",
         "errorNotFound": "Záznam nebyl nalezen.",
         "errorServer": "Chyba serveru. Zkuste to prosím později znovu.",
+        "errorRestoreInProgress": "Právě se obnovuje záloha. Vaše změna nebyla uložena, zkuste to znovu za minutu.",
         "errorTimeout": "Připojení trvalo příliš dlouho. Zkuste to prosím znovu.",
         "requiredFields": "Vyplňte prosím všechna povinná pole.",
         "invalidInput": "Neplatný vstup.",
@@ -61,7 +62,8 @@
             "hint": "Určuje, kdo vidí tuto položku v Yuvomi.",
             "assigneesNobodyHint": "Bez přiřazení vidíš tuto položku jen ty."
         },
-        "toShoppingListNamed": "Přidat {{title}} na nákupní seznam"
+        "toShoppingListNamed": "Přidat {{title}} na nákupní seznam",
+        "emailInUse": "Tato e-mailová adresa již patří jinému účtu."
     },
     "kitchen": {
         "noShoppingLists": "Nákupní seznam ještě neexistuje.",
@@ -741,6 +743,8 @@
         "searchCountCapped": "{{shown}} z {{total}} výsledků",
         "title": "Kalendář",
         "attachmentRemove": "Odebrat přílohu",
+        "attachmentChangeRefused": "Tuto přílohu nemůžeš změnit: dokument je soukromý, nebo nemáš přístup k dokumentům.",
+        "attachmentUploadRefused": "Přílohu může přidat jen ten, kdo smí upravovat dokumenty.",
         "newEvent": "Nová událost",
         "editEvent": "Upravit událost",
         "addEvent": "Přidat událost",
@@ -1123,6 +1127,7 @@
         "phonePreview": "Náhled: {{value}}",
         "phoneImplausible": "Toto číslo vypadá neúplně - přesto bude uloženo.",
         "emailLabel": "E-mail",
+        "emailLockedHint": "Tyto adresy patří k účtu tohoto člena. Změnit je může jen člen sám nebo správce.",
         "emailPlaceholder": "jmeno@example.com",
         "addressLabel": "Adresa",
         "addressPlaceholder": "Ulice, PSČ Město",
@@ -2159,6 +2164,7 @@
         "cardavErrorDuplicate": "Účet s touto adresou a tímto uživatelským jménem je už připojený.",
         "cardavErrorAccountNotFound": "Tento účet už neexistuje. Načti stránku znovu.",
         "cardavErrorAddressbookNotFound": "Tento adresář už neexistuje. Aktualizuj adresáře.",
+        "cardavErrorPasswordRequired": "Pro jiný server nebo uživatelské jméno zadej heslo znovu.",
         "syncPartiallyFailed": "Poslední běh obsahoval chyby",
         "syncErrorDetail": "Poslední běh: {{error}}",
         "cardavEditAccount": "Upravit účet CardDAV",
@@ -2555,16 +2561,24 @@
             "defaultAssigneeHint": "Nově synchronizované události se automaticky přiřadí této osobě.",
             "defaultAssigneeRoutingHint": "Výchozí přiřazení: události z kalendáře dostanou osobu zvolenou u něj a nová událost přiřazená jen této osobě se vytvoří v tomto kalendáři. Platí pro kalendáře Google a CalDAV, ne pro Apple ani Outlook.",
             "backfillTitle": "Doplnit přiřazení",
-            "backfillDescription": "Výchozí přiřazení platí jen pro události přenesené po jeho nastavení. Zde ho můžete jednorázově použít na události už přenesené ze všech účtů. Události, které už někomu přiřazené jsou, zůstanou beze změny.",
+            "backfillDescription": "Výchozí přiřazení platí jen pro události přenesené po jeho nastavení. Zde ho můžete jednorázově použít na události už přenesené ze všech účtů. Nepřiřazené události ho dostanou přímo. Události, které stále nesou výchozí přiřazení jiného kalendáře, se zobrazí jednotlivě k výběru. Jakékoli jiné přiřazení zůstane beze změny.",
             "backfillAction": "Použít na stávající události",
             "backfillQuestion": "Přiřadit {{count}} nepřiřazených událostí?",
             "backfillQuestion_one": "Přiřadit {{count}} nepřiřazenou událost?",
             "backfillDetail": "Každá událost dostane výchozí přiřazení svého kalendáře. Týká se to i událostí, u kterých někdo přiřazení ručně odebral. Vrátit to lze jen událost po události.",
             "backfillConfirm": "Přiřadit",
-            "backfillNone": "V kalendářích s výchozím přiřazením nejsou žádné nepřiřazené události.",
+            "backfillNone": "Nejsou žádné události, na které by se dalo použít výchozí přiřazení.",
             "backfillDone": "Přiřazeno {{count}} událostí.",
             "backfillDone_one": "Přiřazena {{count}} událost.",
-            "backfillChanged": "Od spočítání se události změnily. Použijte to prosím znovu."
+            "backfillChanged": "Od spočítání se události změnily. Použijte to prosím znovu.",
+            "backfillFillCount": "Nepřiřazené události: {{count}}",
+            "backfillFillCount_one": "{{count}} nepřiřazená událost",
+            "backfillMovedTitle": "Události s výchozím přiřazením jiného kalendáře",
+            "backfillMovedHint": "Tyto události stále nesou výchozí přiřazení jiného kalendáře téhož účtu. Může jít o přesunutou událost, nebo o kalendář, jehož výchozí přiřazení bylo později změněno. Změní se jen vybrané události, ostatní zůstanou beze změny.",
+            "backfillMovedPartial": "Události {{first}} až {{last}} z {{total}}. „Přiřadit“ použije výběr na této stránce, „Zobrazit další“ přejde dál bez použití. Nevybrané události zůstanou beze změny.",
+            "backfillMovedNext": "Zobrazit další",
+            "backfillMovedAll": "Vybrat vše",
+            "backfillMovedChange": "Z {{from}} na {{to}}"
         },
         "calendarDefaultsTitle": "Výchozí hodnoty pro nové události",
         "calendarDefaultsDescription": "Předvolby automaticky použité na nové události.",
@@ -2784,6 +2798,9 @@
         "backupRestoreErrorKeyInvalid": "Klíč nedorazil na server v čitelné podobě. Zadejte ho znovu a obnovte ještě jednou. Nic zde nebylo změněno.",
         "backupRestoreErrorOwnKeyMissing": "Tato instalace nemá DB_ENCRYPTION_KEY, a proto zálohu neotevře. Nastavte DB_ENCRYPTION_KEY, restartujte Yuvomi a pak obnovte s klíčem zálohy.",
         "backupRestoreErrorDamaged": "Záloha je poškozená nebo neúplná, klíč je správný. Stáhněte soubor znovu, porovnejte velikost a sha256sum s originálem a obnovte tuto kopii. Nic zde nebylo změněno.",
+        "backupRestoreErrorCorrupt": "Záloha je poškozená nebo neúplná. Stáhněte soubor znovu, porovnejte velikost a sha256sum s originálem a obnovte tuto kopii, nebo použijte starší zálohu. Nic zde nebylo změněno.",
+        "backupRestoreErrorInProgress": "Na této instalaci už probíhá obnova. Počkejte, až skončí, a než obnovíte znovu, zkontrolujte, která záloha je nasazena. Tento požadavek nic nezměnil.",
+        "backupRestoreErrorBusy": "Yuvomi je ještě zaneprázdněné, například synchronizací nebo zálohou, proto obnova nezačala. Nic zde nebylo změněno. Zkuste to za chvíli znovu.",
         "backupRestoreErrorUnreadable": "Zálohu se nepodařilo přečíst. Zkontrolujte, zda je soubor úplný, a zkuste to znovu; přesná příčina je v logu serveru. Nic zde nebylo změněno.",
         "backupRestoreErrorGeneric": "Obnovení se nezdařilo. Přesná příčina je v logu serveru.",
         "backupRestoreErrorNeverEncrypted": "Pokud soubor nikdy nebyl šifrovaný, není platnou databází Yuvomi.",
@@ -2816,6 +2833,8 @@
         "orDivider": "nebo",
         "ssoError": "Přihlášení přes SSO selhalo. Zkuste to prosím znovu.",
         "ssoNoAccount": "Pro toto přihlášení přes SSO zde zatím není žádný účet. Obraťte se na správce vaší domácnosti.",
+        "ssoEmailAmbiguous": "Vaše e-mailová adresa zde patří k více účtům, proto nelze přihlášení přes SSO přiřadit žádnému z nich. Obraťte se na správce vaší domácnosti.",
+        "ssoLinkRequired": "Pro vaši e-mailovou adresu zde již existuje účet s heslem. Přihlaste se jím a propojte SSO v Nastavení → Účet, nebo se obraťte na správce vaší domácnosti.",
         "forgotPassword": "Zapomenuté heslo?",
         "networkError": "Připojení selhalo. Zkontrolujte, zda server běží, a zkuste to znovu.",
         "capsLockWarning": "Caps Lock je zapnutý.",
@@ -3150,8 +3169,7 @@
         "currentMonth": "Aktuální měsíc",
         "noVisitReportsInMonth": "V období {{month}} nebyly zaznamenány žádné návštěvy.",
         "settledAdminOnly": "Upravit nebo smazat ji může jen admin",
-        "reportVisitsCount": "Návštěvy",
-        "receiptPresent": "Přiložen"
+        "reportVisitsCount": "Návštěvy"
     },
     "splitExpenses": {
         "title": "Společné výdaje",
@@ -3250,7 +3268,8 @@
             "recurring_paused": "Opakující se výdaj pozastaven",
             "recurring_resumed": "Opakující se výdaj obnoven",
             "recurring_generated": "Opakující se výdaj vygenerován",
-            "payment_reversed": "Platba stornována"
+            "payment_reversed": "Platba stornována",
+            "ledger_restored": "Zaúčtování obnoveno"
         },
         "splitPercentage": "Procenta",
         "splitExact": "Přesná částka",
@@ -5484,7 +5503,7 @@
         "openAction": "Otevřít {{name}}",
         "limitReached": "Nejvýše dokumentů: {{count}}.",
         "limitReached_one": "Nejvýše dokumentů: {{count}}.",
-        "presentHidden": "Přiložen"
+        "lockedPrivate": "Příloha existuje (soukromá)"
     },
     "join": {
         "title": "Nastavení účtu",

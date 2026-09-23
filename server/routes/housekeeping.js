@@ -42,6 +42,7 @@ import {
   utcToWall,
 } from '../utils/timezone.js';
 import { addMonthsClamped } from '../utils/interval-date.js';
+import { recordLocalColorChoice } from '../services/legacy-color-snapshot.js';
 
 const log = createLogger('Housekeeping');
 const router = express.Router();
@@ -415,6 +416,12 @@ function updateVisitLinks(database, session, worker, checkIn, dailyRate, extras,
       session.calendar_event_id,
     );
     const after = database.prepare('SELECT * FROM calendar_events WHERE id = ?').get(session.calendar_event_id);
+    // Die Farbe der Betreuungskraft ist eine lokale Wahl: ein gespiegelter
+    // Besuch ist damit keine Altlast der Farb-Heilung (#1270) mehr.
+    if (before && after && after.external_source === 'caldav'
+        && String(before.color ?? '').toLowerCase() !== String(after.color ?? '').toLowerCase()) {
+      recordLocalColorChoice(database, [session.calendar_event_id]);
+    }
     // Marker inline statt über markEventOutbound, aus zwei Gründen:
     //
     //   - markEventOutbound lehnt einen schreibgeschützten Provider ab
@@ -644,8 +651,10 @@ function visitCapabilities(row, req) {
 // Sichtbarkeit des einzelnen Dokuments (`documentVisibleSql`, dieselbe Regel
 // wie im Dokumente-Modul). Wer durchfaellt, bekommt `null` fuer beide - auch die
 // ID verraet sonst, dass es ein Dokument dieser Nummer gibt (document-access.js).
-// Uebrig bleibt `has_receipt`, eine Aussage ueber den Besuch, nicht ueber das
-// Dokument.
+// Uebrig bleibt `has_receipt`, eine Aussage ueber den Besuch - aber nur fuer
+// wer Dokumente lesen darf. Ohne dieses Recht ist es `null` wie `attachments`
+// bei Budget, Ausgaben und Inventar und `document_count` bei Aufgaben: kein
+// Beleg und kein Hinweis darauf (#1358, einheitlich seit dem 22.09.).
 //
 // Das Urteil entsteht einmal je Anfrage und geht an `publicSession()`; wer es
 // nicht mitgibt, bekommt die maskierte Form. Ein kuenftiger Serialisierer, der
@@ -685,18 +694,18 @@ function receiptAccess(req) {
       return {
         receipt_document_id: seen ? id : null,
         receipt_document_name: seen ? names.get(id) : null,
-        has_receipt: id != null,
+        has_receipt: hidden ? null : id != null,
       };
     },
   };
 }
 
-// Die Form ohne Urteil: nichts vom Dokument, nur dass es einen Beleg gibt.
+// Die Form ohne Urteil: nichts vom Dokument, auch nicht, ob es einen Beleg gibt.
 const MASKED_RECEIPTS = Object.freeze({
-  view: (row) => ({
+  view: () => ({
     receipt_document_id: null,
     receipt_document_name: null,
-    has_receipt: row.receipt_document_id != null,
+    has_receipt: null,
   }),
 });
 

@@ -46,6 +46,7 @@
         "errorForbidden": "Accesso negato. Per favore accedi di nuovo.",
         "errorNotFound": "La voce non è stata trovata.",
         "errorServer": "Errore del server. Riprova più tardi.",
+        "errorRestoreInProgress": "È in corso il ripristino di un backup. La modifica non è stata salvata, riprova tra un minuto.",
         "errorTimeout": "La connessione ha impiegato troppo tempo. Riprova.",
         "requiredFields": "Compila tutti i campi obbligatori.",
         "invalidInput": "Input non valido.",
@@ -61,7 +62,8 @@
             "hint": "Determina chi può vedere questa voce in Yuvomi.",
             "assigneesNobodyHint": "Senza assegnatari, solo tu vedi questa voce."
         },
-        "toShoppingListNamed": "Aggiungi {{title}} alla lista della spesa"
+        "toShoppingListNamed": "Aggiungi {{title}} alla lista della spesa",
+        "emailInUse": "Questo indirizzo email appartiene già a un altro account."
     },
     "kitchen": {
         "noShoppingLists": "Non c'è ancora una lista della spesa.",
@@ -741,6 +743,8 @@
         "searchCountCapped": "{{shown}} di {{total}} risultati",
         "title": "Calendario",
         "attachmentRemove": "Rimuovi allegato",
+        "attachmentChangeRefused": "Non puoi modificare questo allegato: il documento è privato, oppure non hai accesso ai documenti.",
+        "attachmentUploadRefused": "Solo chi può modificare i documenti può aggiungere un allegato.",
         "newEvent": "Nuovo evento",
         "editEvent": "Modifica evento",
         "addEvent": "Aggiungi evento",
@@ -1123,6 +1127,7 @@
         "phonePreview": "Anteprima: {{value}}",
         "phoneImplausible": "Questo numero sembra incompleto - verrà comunque salvato.",
         "emailLabel": "Email",
+        "emailLockedHint": "Questi indirizzi appartengono all'account di questo membro. Solo il membro stesso o un amministratore può modificarli.",
         "emailPlaceholder": "nome@example.com",
         "addressLabel": "Indirizzo",
         "addressPlaceholder": "Via, CAP Città",
@@ -1939,6 +1944,7 @@
         "cardavErrorDuplicate": "Un account con questo indirizzo e questo nome utente è già collegato.",
         "cardavErrorAccountNotFound": "Questo account non esiste più. Ricarica la pagina.",
         "cardavErrorAddressbookNotFound": "Questa rubrica non esiste più. Aggiorna le rubriche.",
+        "cardavErrorPasswordRequired": "Per un altro server o un altro nome utente inserisci di nuovo la password.",
         "syncPartiallyFailed": "Ultima esecuzione con errori",
         "syncErrorDetail": "Ultima esecuzione: {{error}}",
         "cardavEditAccount": "Modifica account CardDAV",
@@ -2555,16 +2561,24 @@
             "defaultAssigneeHint": "Gli eventi appena sincronizzati vengono assegnati automaticamente a questa persona.",
             "defaultAssigneeRoutingHint": "Assegnazione predefinita: gli eventi di un calendario ricevono la persona scelta lì, e un nuovo evento assegnato solo a quella persona viene creato in quel calendario. Vale per i calendari Google e CalDAV, non per Apple o Outlook.",
             "backfillTitle": "Completa le assegnazioni",
-            "backfillDescription": "L’assegnazione predefinita vale solo per gli appuntamenti importati dopo averla impostata. Qui puoi applicarla una volta agli appuntamenti già importati da tutti gli account. Gli appuntamenti già assegnati a qualcuno restano invariati.",
+            "backfillDescription": "L’assegnazione predefinita vale solo per gli appuntamenti importati dopo averla impostata. Qui puoi applicarla una volta agli appuntamenti già importati da tutti gli account. Gli appuntamenti senza assegnazione la ricevono direttamente. Quelli che portano ancora l’assegnazione predefinita di un altro calendario compaiono uno per uno da scegliere. Ogni altra assegnazione resta invariata.",
             "backfillAction": "Applica agli appuntamenti esistenti",
             "backfillQuestion": "Assegnare {{count}} appuntamenti senza assegnazione?",
             "backfillQuestion_one": "Assegnare {{count}} appuntamento senza assegnazione?",
             "backfillDetail": "Ogni appuntamento riceve l’assegnazione predefinita del suo calendario. Questo include gli appuntamenti la cui assegnazione è stata rimossa a mano. Si può annullare solo un appuntamento alla volta.",
             "backfillConfirm": "Assegna",
-            "backfillNone": "Non ci sono appuntamenti senza assegnazione nei calendari con assegnazione predefinita.",
+            "backfillNone": "Non ci sono appuntamenti a cui applicare un’assegnazione predefinita.",
             "backfillDone": "{{count}} appuntamenti assegnati.",
             "backfillDone_one": "{{count}} appuntamento assegnato.",
-            "backfillChanged": "Gli appuntamenti sono cambiati dopo il conteggio. Applica di nuovo."
+            "backfillChanged": "Gli appuntamenti sono cambiati dopo il conteggio. Applica di nuovo.",
+            "backfillFillCount": "{{count}} appuntamenti senza assegnazione",
+            "backfillFillCount_one": "{{count}} appuntamento senza assegnazione",
+            "backfillMovedTitle": "Appuntamenti con l’assegnazione predefinita di un altro calendario",
+            "backfillMovedHint": "Questi appuntamenti portano ancora l’assegnazione predefinita di un altro calendario dello stesso account. Può trattarsi di un appuntamento spostato o di un calendario la cui assegnazione predefinita è stata cambiata in seguito. Cambiano solo gli appuntamenti selezionati, gli altri restano come sono.",
+            "backfillMovedPartial": "Appuntamenti da {{first}} a {{last}} di {{total}}. «Assegna» applica la selezione di questa pagina, «Mostra i successivi» va avanti senza applicarla. Gli appuntamenti non selezionati restano invariati.",
+            "backfillMovedNext": "Mostra i successivi",
+            "backfillMovedAll": "Seleziona tutti",
+            "backfillMovedChange": "Da {{from}} a {{to}}"
         },
         "calendarDefaultsTitle": "Valori predefiniti per i nuovi eventi",
         "calendarDefaultsDescription": "Preimpostazioni applicate automaticamente ai nuovi eventi.",
@@ -2784,6 +2798,9 @@
         "backupRestoreErrorKeyInvalid": "La chiave non è arrivata al server in forma leggibile. Inseriscila di nuovo e ripristina ancora. Qui non è stato modificato nulla.",
         "backupRestoreErrorOwnKeyMissing": "Questa installazione non ha una DB_ENCRYPTION_KEY e quindi non può aprire il backup. Imposta DB_ENCRYPTION_KEY, riavvia Yuvomi e poi ripristina con la chiave del backup.",
         "backupRestoreErrorDamaged": "Il backup è danneggiato o incompleto; la chiave è giusta. Recupera di nuovo il file, confronta dimensione e sha256sum con l'originale e ripristina quella copia. Qui non è stato modificato nulla.",
+        "backupRestoreErrorCorrupt": "Il backup è danneggiato o incompleto. Recupera di nuovo il file, confronta dimensione e sha256sum con l'originale e ripristina quella copia, oppure usa un backup più vecchio. Qui non è stato modificato nulla.",
+        "backupRestoreErrorInProgress": "Su questa installazione è già in corso un ripristino. Attendi che finisca, poi controlla quale backup è attivo prima di ripristinare di nuovo. Questa richiesta non ha modificato nulla.",
+        "backupRestoreErrorBusy": "Yuvomi è ancora occupato, per esempio con una sincronizzazione o un backup, quindi il ripristino non è partito. Qui non è stato modificato nulla. Riprova tra un momento.",
         "backupRestoreErrorUnreadable": "Impossibile leggere il backup. Verifica che il file sia completo e riprova; la causa esatta è nel log del server. Qui non è stato modificato nulla.",
         "backupRestoreErrorGeneric": "Il ripristino non è riuscito. La causa esatta è nel log del server.",
         "backupRestoreErrorNeverEncrypted": "Se il file non è mai stato cifrato, non è un database Yuvomi valido.",
@@ -2816,6 +2833,8 @@
         "orDivider": "o",
         "ssoError": "Accesso SSO non riuscito. Riprova.",
         "ssoNoAccount": "Non esiste ancora un account qui per questo accesso SSO. Contatta l'amministratore della tua famiglia.",
+        "ssoEmailAmbiguous": "Il tuo indirizzo email appartiene qui a più account, quindi l'accesso SSO non può essere associato a nessuno di essi. Contatta l'amministratore della tua famiglia.",
+        "ssoLinkRequired": "Qui esiste già un account con password per il tuo indirizzo email. Accedi con quello e collega l'SSO in Impostazioni → Account, oppure contatta l'amministratore della tua famiglia.",
         "forgotPassword": "Password dimenticata?",
         "networkError": "Connessione non riuscita. Verifica che il server sia in esecuzione e riprova.",
         "capsLockWarning": "Il tasto Bloc Maiusc è attivo.",
@@ -3578,8 +3597,7 @@
         "currentMonth": "Corrente",
         "noVisitReportsInMonth": "Nessuna visita del personale registrata per {{month}}.",
         "settledAdminOnly": "Solo un admin può modificarla o eliminarla",
-        "reportVisitsCount": "Visite",
-        "receiptPresent": "Allegato"
+        "reportVisitsCount": "Visite"
     },
     "userMultiSelect": {
         "moreUsers": "altri",
@@ -3682,7 +3700,8 @@
             "recurring_paused": "Spesa ricorrente sospesa",
             "recurring_resumed": "Spesa ricorrente ripresa",
             "recurring_generated": "Spesa ricorrente generata",
-            "payment_reversed": "Pagamento stornato"
+            "payment_reversed": "Pagamento stornato",
+            "ledger_restored": "Registrazione ripristinata"
         },
         "splitPercentage": "Percentuale",
         "splitExact": "Importo esatto",
@@ -5484,7 +5503,7 @@
         "openAction": "Apri {{name}}",
         "limitReached": "Al massimo {{count}} documenti.",
         "limitReached_one": "Al massimo {{count}} documento.",
-        "presentHidden": "Allegato"
+        "lockedPrivate": "Allegato presente (privato)"
     },
     "join": {
         "title": "Configura il tuo account",

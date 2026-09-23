@@ -4,12 +4,14 @@
  * Abhängigkeiten: tsdav, server/db.js
  */
 
+import { runExternalJob } from '../utils/restore-state.js';
 import { createLogger } from '../logger.js';
 const log = createLogger('CardDAV');
 
 import * as db from '../db.js';
 import { composeDisplayName, normalizeNameParts } from '../../public/utils/contact-name.js';
 import { toE164, defaultCountryFromConfig } from '../utils/phone.js';
+import { mayChangeContactEmails } from './contact-identity.js';
 
 // --------------------------------------------------------
 // Helper Functions
@@ -512,6 +514,25 @@ function getAllAccounts() {
 }
 
 /**
+ * Ob zwei Konto-Adressen denselben Empfaenger fuer die Zugangsdaten meinen:
+ * Schema, Host und Port, normalisiert ueber `URL` (Host in Kleinschrift,
+ * Standardport entfaellt). Der Pfad zaehlt nicht - er waehlt auf demselben
+ * Server nur eine andere Sammlung. Eine Adresse, die `URL` nicht versteht,
+ * zaehlt nur bei woertlicher Gleichheit als dieselbe.
+ */
+function sameCredentialOrigin(a, b) {
+  const origin = (raw) => {
+    try { return new URL(String(raw).trim()).origin; } catch { return null; }
+  };
+  const oa = origin(a);
+  const ob = origin(b);
+  if (oa === null || ob === null || oa === 'null' || ob === 'null') {
+    return String(a).trim() === String(b).trim();
+  }
+  return oa === ob;
+}
+
+/**
  * Zugangsdaten eines Kontos ändern. Die Adressbuch-Auswahl bleibt erhalten -
  * genau dafür existiert dieser Pfad: ein rotiertes Passwort soll nicht bedeuten,
  * dass das Konto gelöscht und die Auswahl neu getroffen werden muss.
@@ -520,10 +541,18 @@ function getAllAccounts() {
  * (UNIQUE(carddav_url, username)); der Fall wird als 'conflict' gemeldet statt
  * als Ausnahme.
  *
+ * DAS GESPEICHERTE PASSWORT GEHOERT ZU EINEM SERVER UND EINEM BENUTZER. Wer den
+ * Server (Schema, Host, Port) oder den Benutzernamen wechselt, muss es neu
+ * eingeben; sonst 'password-required', und nichts wird geschrieben. Ohne diese
+ * Regel reichte ein PUT mit fremder Adresse und leerem Passwort, und der
+ * naechste Test oder Sync schickte die Zugangsdaten des Haushalts per Basic
+ * Auth dorthin. Ein anderer Pfad auf demselben Server bleibt ohne Passwort
+ * moeglich: die Zugangsdaten gehen an denselben Empfaenger wie vorher.
+ *
  * @param {number} accountId
  * @param {{name:string, cardavUrl:string, username:string, password:string|null}} fields
  *        password === null lässt das gespeicherte Passwort unberührt.
- * @returns {Object|'not-found'|'conflict'} Konto ohne Passwort
+ * @returns {Object|'not-found'|'conflict'|'password-required'} Konto ohne Passwort
  */
 function updateAccount(accountId, { name, cardavUrl, username, password }) {
   const database = db.get();
@@ -535,6 +564,11 @@ function updateAccount(accountId, { name, cardavUrl, username, password }) {
     WHERE carddav_url = ? AND username = ? AND id != ?
   `).get(cardavUrl, username, accountId);
   if (clash) return 'conflict';
+
+  if (password === null
+      && (!sameCredentialOrigin(cardavUrl, account.carddav_url) || username !== account.username)) {
+    return 'password-required';
+  }
 
   database.prepare(`
     UPDATE carddav_accounts
@@ -700,7 +734,15 @@ function toggleAddressbook(addressbookId, enabled) {
  *
  * @returns {Promise<{ success: boolean, syncedAccounts: number, syncedContacts: number }>}
  */
-async function sync() {
+/**
+ * Der Sync als Job, der nach aussen schreibt: waehrend eines Restores beginnt
+ * er nicht, und ein laufender wird abgewartet (Codex-Befund in #1431).
+ */
+function sync() {
+  return runExternalJob(() => runCarddavSync());
+}
+
+async function runCarddavSync() {
   const accounts = getAllAccounts();
 
   if (accounts.length === 0) {
@@ -1284,7 +1326,9 @@ function updateContact(contactId, vcard, fillAll = false) {
   }
 
   maybeUpdate('phone', 'phone', scalar.phone);
-  maybeUpdate('email', 'email', scalar.email);
+  // Die E-Mail eines verknuepften Kontakts fuehrt zu seinem Konto; der Sync
+  // handelt fuer niemanden und laesst sie deshalb stehen (contact-identity.js).
+  if (mayChangeContactEmails(contact, null)) maybeUpdate('email', 'email', scalar.email);
   maybeUpdate('address', 'address', scalar.address);
   maybeUpdate('organization', 'organization', vcard.organization);
   maybeUpdate('jobTitle', 'job_title', vcard.jobTitle);
@@ -1312,6 +1356,10 @@ function updateContact(contactId, vcard, fillAll = false) {
  */
 function updateContactMultiValues(contactId, vcard) {
   const conn = db.get();
+  // Zweitadressen eines verknuepften Kontakts verknuepfen per SSO auf sein
+  // Konto; der Sync handelt fuer niemanden und fasst sie nicht an.
+  const linked = conn.prepare('SELECT family_user_id FROM contacts WHERE id = ?').get(contactId);
+  const emailsLocked = !mayChangeContactEmails(linked, null);
 
   const phones    = conn.prepare('SELECT label, value, is_primary FROM contact_phones WHERE contact_id = ? ORDER BY id').all(contactId);
   const emails    = conn.prepare('SELECT label, value, is_primary FROM contact_emails WHERE contact_id = ? ORDER BY id').all(contactId);
@@ -1333,7 +1381,9 @@ function updateContactMultiValues(contactId, vcard) {
   const incoming = {
     ...vcard,
     phones:    without(vcard.phones,    primaryKeys(phones, keyOf),           keyOf),
-    emails:    without(vcard.emails,    primaryKeys(emails, keyOf),           keyOf),
+    emails:    emailsLocked
+      ? emails.filter((r) => !r.is_primary)
+      : without(vcard.emails,    primaryKeys(emails, keyOf),           keyOf),
     addresses: without(vcard.addresses, primaryKeys(addresses, addressKeyOf), addressKeyOf),
   };
 
@@ -1353,11 +1403,11 @@ function updateContactMultiValues(contactId, vcard) {
   const transaction = conn.transaction(() => {
     // Delete non-primary entries
     conn.prepare('DELETE FROM contact_phones WHERE contact_id = ? AND is_primary = 0').run(contactId);
-    conn.prepare('DELETE FROM contact_emails WHERE contact_id = ? AND is_primary = 0').run(contactId);
+    if (!emailsLocked) conn.prepare('DELETE FROM contact_emails WHERE contact_id = ? AND is_primary = 0').run(contactId);
     conn.prepare('DELETE FROM contact_addresses WHERE contact_id = ? AND is_primary = 0').run(contactId);
 
     // Insert new entries from vCard
-    insertContactMultiValues(contactId, incoming);
+    insertContactMultiValues(contactId, emailsLocked ? { ...incoming, emails: [] } : incoming);
   });
 
   transaction();

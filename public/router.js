@@ -4282,7 +4282,9 @@ function showToast(message, type = 'default', duration = 3000, onUndo = null) {
 
   const toast = document.createElement('div');
   toast.className = `toast ${type !== 'default' ? `toast--${type}` : ''}`;
-  toast.setAttribute('role', 'alert');
+  // Keine eigene Live-Rolle: die Region (hoeflich oder bestimmt) sagt an.
+  // `role="alert"` machte jeden Toast bestimmt, auch in der hoeflichen Region,
+  // und liess ihn je nach Screenreader doppelt ansagen.
 
   const iconEl = TOAST_ICONS[type]?.();
   if (iconEl) toast.appendChild(iconEl);
@@ -4329,6 +4331,8 @@ function friendlyError(err) {
   // navigator.onLine fälschlich true meldet (Netz weg, aber kein offline-Event).
   if (err?.status === 0) return t('common.errorOfflineMutation');
   if (!navigator.onLine) return t('common.errorOffline');
+  // Vor dem Status-Zweig: ein 503 waehrend eines Restores ist kein Serverfehler (#1431).
+  if (err?.data?.reason === 'restore_in_progress') return t('common.errorRestoreInProgress');
   const status = err?.status ?? err?.response?.status;
   if (status === 403) return t('common.errorForbidden');
   if (status === 404) return t('common.errorNotFound');

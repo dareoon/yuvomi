@@ -46,6 +46,7 @@
         "errorForbidden": "Akses ditolak. Harap masuk kembali.",
         "errorNotFound": "Entri tidak ditemukan.",
         "errorServer": "Kesalahan server. Coba lagi nanti.",
+        "errorRestoreInProgress": "Cadangan sedang dipulihkan saat ini. Perubahan Anda tidak disimpan, coba lagi dalam satu menit.",
         "errorTimeout": "Koneksi terlalu lama. Silakan coba lagi.",
         "requiredFields": "Harap isi semua bidang wajib.",
         "invalidInput": "Masukan tidak valid.",
@@ -61,7 +62,8 @@
             "hint": "Menentukan siapa yang dapat melihat entri ini di Yuvomi.",
             "assigneesNobodyHint": "Tanpa penerima tugas, hanya kamu yang melihat entri ini."
         },
-        "toShoppingListNamed": "Tambahkan {{title}} ke daftar belanja"
+        "toShoppingListNamed": "Tambahkan {{title}} ke daftar belanja",
+        "emailInUse": "Alamat email ini sudah dimiliki akun lain."
     },
     "kitchen": {
         "noShoppingLists": "Belum ada daftar belanja.",
@@ -753,6 +755,8 @@
         "searchCountCapped": "{{shown}} dari {{total}} hasil",
         "title": "Kalender",
         "attachmentRemove": "Hapus lampiran",
+        "attachmentChangeRefused": "Kamu tidak bisa mengubah lampiran ini: dokumennya pribadi, atau kamu tidak punya akses ke dokumen.",
+        "attachmentUploadRefused": "Hanya yang boleh mengedit dokumen yang bisa menambahkan lampiran.",
         "newEvent": "Acara baru",
         "editEvent": "Ubah acara",
         "addEvent": "Tambah acara",
@@ -1136,6 +1140,7 @@
         "phonePreview": "Pratinjau: {{value}}",
         "phoneImplausible": "Nomor ini tampak tidak lengkap - tetap akan disimpan.",
         "emailLabel": "Email",
+        "emailLockedHint": "Alamat ini milik akun anggota ini. Hanya anggota itu sendiri atau admin yang dapat mengubahnya.",
         "emailPlaceholder": "nama@contoh.com",
         "addressLabel": "Alamat",
         "addressPlaceholder": "Jalan, kode pos kota",
@@ -2171,6 +2176,7 @@
         "cardavErrorDuplicate": "Akun dengan alamat dan nama pengguna ini sudah terhubung.",
         "cardavErrorAccountNotFound": "Akun ini sudah tidak ada. Muat ulang halaman.",
         "cardavErrorAddressbookNotFound": "Buku alamat ini sudah tidak ada. Segarkan daftar buku alamat.",
+        "cardavErrorPasswordRequired": "Server atau nama pengguna yang berbeda memerlukan kata sandi lagi.",
         "syncPartiallyFailed": "Proses terakhir bermasalah",
         "syncErrorDetail": "Proses terakhir: {{error}}",
         "cardavEditAccount": "Edit akun CardDAV",
@@ -2567,16 +2573,24 @@
             "defaultAssigneeHint": "Acara yang baru disinkronkan otomatis ditugaskan ke orang ini.",
             "defaultAssigneeRoutingHint": "Penerima tugas default: acara dari sebuah kalender mendapat orang yang dipilih di sana, dan acara baru yang hanya ditugaskan ke orang itu dibuat di kalender tersebut. Berlaku untuk kalender Google dan CalDAV, bukan Apple atau Outlook.",
             "backfillTitle": "Lengkapi penugasan",
-            "backfillDescription": "Penerima tugas default hanya berlaku untuk janji temu yang diimpor setelah diatur. Di sini Anda dapat menerapkannya sekali ke janji temu yang sudah diimpor dari semua akun. Janji temu yang sudah ditugaskan ke seseorang tidak berubah.",
+            "backfillDescription": "Penerima tugas default hanya berlaku untuk janji temu yang diimpor setelah diatur. Di sini Anda dapat menerapkannya sekali ke janji temu yang sudah diimpor dari semua akun. Janji temu tanpa penerima tugas langsung mendapatkannya. Janji temu yang masih membawa penerima tugas default kalender lain ditampilkan satu per satu untuk Anda pilih. Penugasan lain tidak berubah.",
             "backfillAction": "Terapkan ke janji temu yang ada",
             "backfillQuestion": "Tugaskan {{count}} janji temu tanpa penerima tugas?",
             "backfillQuestion_one": "Tugaskan {{count}} janji temu tanpa penerima tugas?",
             "backfillDetail": "Setiap janji temu mendapat penerima tugas default dari kalendernya. Ini termasuk janji temu yang penugasannya dihapus secara manual oleh seseorang. Hanya bisa dibatalkan satu per satu.",
             "backfillConfirm": "Tugaskan",
-            "backfillNone": "Tidak ada janji temu tanpa penerima tugas di kalender dengan penerima tugas default.",
+            "backfillNone": "Tidak ada janji temu yang perlu diberi penerima tugas default.",
             "backfillDone": "{{count}} janji temu ditugaskan.",
             "backfillDone_one": "{{count}} janji temu ditugaskan.",
-            "backfillChanged": "Janji temu berubah sejak dihitung. Terapkan lagi."
+            "backfillChanged": "Janji temu berubah sejak dihitung. Terapkan lagi.",
+            "backfillFillCount": "{{count}} janji temu tanpa penerima tugas",
+            "backfillFillCount_one": "{{count}} janji temu tanpa penerima tugas",
+            "backfillMovedTitle": "Janji temu dengan penerima tugas default kalender lain",
+            "backfillMovedHint": "Janji temu ini masih membawa penerima tugas default dari kalender lain di akun yang sama. Itu bisa berupa janji temu yang dipindahkan, atau kalender yang penerima tugas default-nya diubah kemudian. Hanya janji temu yang dipilih yang berubah; yang lain tetap seperti semula.",
+            "backfillMovedPartial": "Janji temu {{first}} sampai {{last}} dari {{total}}. “Tugaskan” menerapkan pilihan di halaman ini, “Tampilkan berikutnya” lanjut tanpa menerapkannya. Janji temu yang tidak dipilih tetap seperti semula.",
+            "backfillMovedNext": "Tampilkan berikutnya",
+            "backfillMovedAll": "Pilih semua",
+            "backfillMovedChange": "Dari {{from}} ke {{to}}"
         },
         "calendarDefaultsTitle": "Bawaan untuk acara baru",
         "calendarDefaultsDescription": "Prasetel yang otomatis diterapkan ke acara baru.",
@@ -2796,6 +2810,9 @@
         "backupRestoreErrorKeyInvalid": "Kunci tidak sampai ke server dalam bentuk yang terbaca. Masukkan lagi lalu pulihkan sekali lagi. Tidak ada yang diubah di sini.",
         "backupRestoreErrorOwnKeyMissing": "Instalasi ini tidak memiliki DB_ENCRYPTION_KEY sehingga tidak dapat membuka cadangan. Atur DB_ENCRYPTION_KEY, mulai ulang Yuvomi, lalu pulihkan dengan kunci cadangan.",
         "backupRestoreErrorDamaged": "Cadangan rusak atau tidak lengkap; kuncinya benar. Ambil file lagi, bandingkan ukuran dan sha256sum dengan aslinya, lalu pulihkan salinan itu. Tidak ada yang diubah di sini.",
+        "backupRestoreErrorCorrupt": "Cadangan rusak atau tidak lengkap. Ambil file lagi, bandingkan ukuran dan sha256sum dengan aslinya, lalu pulihkan salinan itu, atau gunakan cadangan yang lebih lama. Tidak ada yang diubah di sini.",
+        "backupRestoreErrorInProgress": "Pemulihan sudah berjalan di instalasi ini. Tunggu hingga selesai, lalu periksa cadangan mana yang terpasang sebelum memulihkan lagi. Permintaan ini tidak mengubah apa pun.",
+        "backupRestoreErrorBusy": "Yuvomi masih sibuk, misalnya dengan sinkronisasi atau cadangan, jadi pemulihan belum dimulai. Tidak ada yang diubah di sini. Coba lagi sebentar lagi.",
         "backupRestoreErrorUnreadable": "Cadangan tidak dapat dibaca. Pastikan file lengkap lalu coba lagi; penyebab pastinya ada di log server. Tidak ada yang diubah di sini.",
         "backupRestoreErrorGeneric": "Pemulihan gagal. Penyebab pastinya ada di log server.",
         "backupRestoreErrorNeverEncrypted": "Jika file tidak pernah dienkripsi, file ini bukan database Yuvomi yang valid.",
@@ -2828,6 +2845,8 @@
         "orDivider": "atau",
         "ssoError": "Masuk SSO gagal. Silakan coba lagi.",
         "ssoNoAccount": "Belum ada akun di sini untuk masuk SSO ini. Silakan hubungi administrator rumah tangga Anda.",
+        "ssoEmailAmbiguous": "Alamat email Anda terdaftar di lebih dari satu akun di sini, sehingga masuk SSO tidak dapat dicocokkan dengan salah satunya. Silakan hubungi administrator rumah tangga Anda.",
+        "ssoLinkRequired": "Sudah ada akun dengan kata sandi untuk alamat email Anda di sini. Masuk dengan akun itu dan tautkan SSO di Pengaturan → Akun, atau hubungi administrator rumah tangga Anda.",
         "forgotPassword": "Lupa kata sandi?",
         "networkError": "Koneksi gagal. Periksa apakah server berjalan lalu coba lagi.",
         "capsLockWarning": "Caps Lock aktif.",
@@ -3582,8 +3601,7 @@
         "currentMonth": "Saat ini",
         "noVisitReportsInMonth": "Tidak ada kunjungan tercatat pada {{month}}.",
         "settledAdminOnly": "Hanya admin yang dapat mengubah atau menghapusnya",
-        "reportVisitsCount": "Kunjungan",
-        "receiptPresent": "Terlampir"
+        "reportVisitsCount": "Kunjungan"
     },
     "splitExpenses": {
         "title": "Pengeluaran Bersama",
@@ -3682,7 +3700,8 @@
             "recurring_paused": "Pengeluaran berulang dijeda",
             "recurring_resumed": "Pengeluaran berulang dilanjutkan",
             "recurring_generated": "Pengeluaran berulang dihasilkan",
-            "payment_reversed": "Pembayaran dibatalkan"
+            "payment_reversed": "Pembayaran dibatalkan",
+            "ledger_restored": "Pembukuan dipulihkan"
         },
         "splitPercentage": "Persen",
         "splitExact": "Jumlah pasti",
@@ -5484,7 +5503,7 @@
         "openAction": "Buka {{name}}",
         "limitReached": "Maksimal {{count}} dokumen.",
         "limitReached_one": "Maksimal {{count}} dokumen.",
-        "presentHidden": "Terlampir"
+        "lockedPrivate": "Ada lampiran (pribadi)"
     },
     "join": {
         "title": "Siapkan akun Anda",

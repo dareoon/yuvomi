@@ -46,6 +46,7 @@
         "errorForbidden": "Accès refusé. Veuillez vous reconnecter.",
         "errorNotFound": "L'entrée n'a pas été trouvée.",
         "errorServer": "Erreur serveur. Veuillez réessayer plus tard.",
+        "errorRestoreInProgress": "Une sauvegarde est en cours de restauration. Votre modification n'a pas été enregistrée, réessayez dans une minute.",
         "errorTimeout": "La connexion a pris trop de temps. Veuillez réessayer.",
         "requiredFields": "Veuillez remplir tous les champs obligatoires.",
         "invalidInput": "Saisie invalide.",
@@ -61,7 +62,8 @@
             "hint": "Détermine qui peut voir cette entrée dans Yuvomi.",
             "assigneesNobodyHint": "Sans personne assignée, vous seul voyez cette entrée."
         },
-        "toShoppingListNamed": "Ajouter {{title}} à la liste de courses"
+        "toShoppingListNamed": "Ajouter {{title}} à la liste de courses",
+        "emailInUse": "Cette adresse e-mail appartient déjà à un autre compte."
     },
     "kitchen": {
         "noShoppingLists": "Il n'y a encore aucune liste de courses.",
@@ -741,6 +743,8 @@
         "searchCountCapped": "{{shown}} sur {{total}} résultats",
         "title": "Calendrier",
         "attachmentRemove": "Supprimer la pièce jointe",
+        "attachmentChangeRefused": "Tu ne peux pas modifier cette pièce jointe : le document est privé, ou tu n'as pas accès aux documents.",
+        "attachmentUploadRefused": "Seules les personnes autorisées à modifier les documents peuvent ajouter une pièce jointe.",
         "newEvent": "Nouvel événement",
         "editEvent": "Modifier l'événement",
         "addEvent": "Ajouter un événement",
@@ -1123,6 +1127,7 @@
         "phonePreview": "Aperçu : {{value}}",
         "phoneImplausible": "Ce numéro semble incomplet - il sera tout de même enregistré.",
         "emailLabel": "E-mail",
+        "emailLockedHint": "Ces adresses appartiennent au compte de ce membre. Seul le membre lui-même ou un administrateur peut les modifier.",
         "emailPlaceholder": "nom@exemple.fr",
         "addressLabel": "Adresse",
         "addressPlaceholder": "Rue, Code postal Ville",
@@ -1939,6 +1944,7 @@
         "cardavErrorDuplicate": "Un compte avec cette adresse et cet identifiant est déjà connecté.",
         "cardavErrorAccountNotFound": "Ce compte n’existe plus. Recharge la page.",
         "cardavErrorAddressbookNotFound": "Ce carnet d’adresses n’existe plus. Actualise les carnets d’adresses.",
+        "cardavErrorPasswordRequired": "Pour un autre serveur ou un autre nom d’utilisateur, saisis à nouveau le mot de passe.",
         "syncPartiallyFailed": "Dernière exécution en erreur",
         "syncErrorDetail": "Dernière exécution : {{error}}",
         "cardavEditAccount": "Modifier le compte CardDAV",
@@ -2555,16 +2561,24 @@
             "defaultAssigneeHint": "Les événements nouvellement synchronisés sont automatiquement attribués à cette personne.",
             "defaultAssigneeRoutingHint": "Attribution par défaut: les événements d'un calendrier reçoivent la personne choisie pour lui, et un nouvel événement attribué uniquement à cette personne est créé dans ce calendrier. Cela vaut pour les calendriers Google et CalDAV, pas pour Apple ni Outlook.",
             "backfillTitle": "Compléter les attributions",
-            "backfillDescription": "L’attribution par défaut ne s’applique qu’aux rendez-vous importés après sa définition. Ici, vous pouvez l’appliquer une fois aux rendez-vous déjà importés de tous les comptes. Les rendez-vous déjà attribués à quelqu’un restent inchangés.",
+            "backfillDescription": "L’attribution par défaut ne s’applique qu’aux rendez-vous importés après sa définition. Ici, vous pouvez l’appliquer une fois aux rendez-vous déjà importés de tous les comptes. Les rendez-vous sans attribution la reçoivent directement. Les rendez-vous qui portent encore l’attribution par défaut d’un autre calendrier sont proposés un par un. Toute autre attribution reste inchangée.",
             "backfillAction": "Appliquer aux rendez-vous existants",
             "backfillQuestion": "Attribuer {{count}} rendez-vous sans attribution ?",
             "backfillQuestion_one": "Attribuer {{count}} rendez-vous sans attribution ?",
             "backfillDetail": "Chaque rendez-vous reçoit l’attribution par défaut de son calendrier. Cela inclut les rendez-vous dont quelqu’un a retiré l’attribution à la main. L’annulation ne se fait que rendez-vous par rendez-vous.",
             "backfillConfirm": "Attribuer",
-            "backfillNone": "Aucun rendez-vous sans attribution dans les calendriers ayant une attribution par défaut.",
+            "backfillNone": "Aucun rendez-vous auquel appliquer une attribution par défaut.",
             "backfillDone": "{{count}} rendez-vous attribués.",
             "backfillDone_one": "{{count}} rendez-vous attribué.",
-            "backfillChanged": "Les rendez-vous ont changé depuis le décompte. Veuillez réappliquer."
+            "backfillChanged": "Les rendez-vous ont changé depuis le décompte. Veuillez réappliquer.",
+            "backfillFillCount": "{{count}} rendez-vous sans attribution",
+            "backfillFillCount_one": "{{count}} rendez-vous sans attribution",
+            "backfillMovedTitle": "Rendez-vous avec l’attribution par défaut d’un autre calendrier",
+            "backfillMovedHint": "Ces rendez-vous portent encore l’attribution par défaut d’un autre calendrier du même compte. Il peut s’agir d’un rendez-vous déplacé, ou d’un calendrier dont l’attribution par défaut a été modifiée ensuite. Seuls les rendez-vous sélectionnés changent, les autres restent tels quels.",
+            "backfillMovedPartial": "Rendez-vous {{first}} à {{last}} sur {{total}}. « Attribuer » applique la sélection de cette page, « Afficher les suivants » passe à la suite sans l’appliquer. Les rendez-vous non sélectionnés restent inchangés.",
+            "backfillMovedNext": "Afficher les suivants",
+            "backfillMovedAll": "Tout sélectionner",
+            "backfillMovedChange": "De {{from}} à {{to}}"
         },
         "calendarDefaultsTitle": "Valeurs par défaut des nouveaux événements",
         "calendarDefaultsDescription": "Préréglages appliqués automatiquement aux nouveaux événements.",
@@ -2784,6 +2798,9 @@
         "backupRestoreErrorKeyInvalid": "La clé n'est pas arrivée lisible au serveur. Saisissez-la à nouveau et relancez la restauration. Rien n'a été modifié ici.",
         "backupRestoreErrorOwnKeyMissing": "Cette installation n'a pas de DB_ENCRYPTION_KEY et ne peut donc pas ouvrir la sauvegarde. Définissez DB_ENCRYPTION_KEY, redémarrez Yuvomi, puis restaurez avec la clé de la sauvegarde.",
         "backupRestoreErrorDamaged": "La sauvegarde est endommagée ou incomplète ; la clé est correcte. Récupérez à nouveau le fichier, comparez sa taille et son sha256sum avec l'original, puis restaurez cette copie. Rien n'a été modifié ici.",
+        "backupRestoreErrorCorrupt": "La sauvegarde est endommagée ou incomplète. Récupérez à nouveau le fichier, comparez sa taille et son sha256sum avec l'original, puis restaurez cette copie ou utilisez une sauvegarde plus ancienne. Rien n'a été modifié ici.",
+        "backupRestoreErrorInProgress": "Une restauration est déjà en cours sur cette installation. Attendez qu'elle soit terminée, puis vérifiez quelle sauvegarde est en place avant de restaurer à nouveau. Cette demande n'a rien modifié.",
+        "backupRestoreErrorBusy": "Yuvomi est encore occupé, par exemple par une synchronisation ou une sauvegarde, la restauration n'a donc pas commencé. Rien n'a été modifié ici. Réessayez dans un instant.",
         "backupRestoreErrorUnreadable": "La sauvegarde n'a pas pu être lue. Vérifiez que le fichier est complet et réessayez ; la cause exacte figure dans le journal du serveur. Rien n'a été modifié ici.",
         "backupRestoreErrorGeneric": "La restauration a échoué. La cause exacte figure dans le journal du serveur.",
         "backupRestoreErrorNeverEncrypted": "Si le fichier n'a jamais été chiffré, ce n'est pas une base de données Yuvomi valide.",
@@ -2816,6 +2833,8 @@
         "orDivider": "ou",
         "ssoError": "La connexion SSO a échoué. Veuillez réessayer.",
         "ssoNoAccount": "Aucun compte n'existe encore ici pour cette connexion SSO. Contactez l'administrateur de votre foyer.",
+        "ssoEmailAmbiguous": "Votre adresse e-mail est associée à plusieurs comptes ici, la connexion SSO ne peut donc être rattachée à aucun d'eux. Contactez l'administrateur de votre foyer.",
+        "ssoLinkRequired": "Un compte avec mot de passe existe déjà ici pour votre adresse e-mail. Connectez-vous avec celui-ci et associez le SSO dans Paramètres → Compte, ou contactez l'administrateur de votre foyer.",
         "forgotPassword": "Mot de passe oublié ?",
         "networkError": "Échec de la connexion. Vérifiez que le serveur fonctionne, puis réessayez.",
         "capsLockWarning": "La touche Verr. Maj est activée.",
@@ -3578,8 +3597,7 @@
         "currentMonth": "Actuel",
         "noVisitReportsInMonth": "Aucune intervention enregistrée en {{month}}.",
         "settledAdminOnly": "Seul un admin peut la modifier ou la supprimer",
-        "reportVisitsCount": "Visites",
-        "receiptPresent": "Joint"
+        "reportVisitsCount": "Visites"
     },
     "userMultiSelect": {
         "moreUsers": "autres",
@@ -3682,7 +3700,8 @@
             "recurring_paused": "Dépense récurrente suspendue",
             "recurring_resumed": "Dépense récurrente reprise",
             "recurring_generated": "Dépense récurrente générée",
-            "payment_reversed": "Paiement annulé"
+            "payment_reversed": "Paiement annulé",
+            "ledger_restored": "Écriture rétablie"
         },
         "splitPercentage": "Pourcentage",
         "splitExact": "Montant exact",
@@ -5484,7 +5503,7 @@
         "openAction": "Ouvrir {{name}}",
         "limitReached": "{{count}} documents au maximum.",
         "limitReached_one": "{{count}} document au maximum.",
-        "presentHidden": "Joint"
+        "lockedPrivate": "Pièce jointe présente (privée)"
     },
     "join": {
         "title": "Configurer votre compte",

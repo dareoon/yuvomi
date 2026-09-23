@@ -46,6 +46,7 @@
         "errorForbidden": "Odmowa dostępu. Zaloguj się ponownie.",
         "errorNotFound": "Wpis nie został znaleziony.",
         "errorServer": "Błąd serwera. Spróbuj ponownie później.",
+        "errorRestoreInProgress": "Trwa właśnie przywracanie kopii zapasowej. Twoja zmiana nie została zapisana, spróbuj ponownie za minutę.",
         "errorTimeout": "Połączenie trwało zbyt długo. Spróbuj ponownie.",
         "requiredFields": "Wypełnij wszystkie wymagane pola.",
         "invalidInput": "Nieprawidłowe dane.",
@@ -61,7 +62,8 @@
             "hint": "Określa, kto może zobaczyć ten wpis w Yuvomi.",
             "assigneesNobodyHint": "Bez przypisania widzisz ten wpis tylko ty."
         },
-        "toShoppingListNamed": "Dodaj {{title}} na listę zakupów"
+        "toShoppingListNamed": "Dodaj {{title}} na listę zakupów",
+        "emailInUse": "Ten adres e-mail należy już do innego konta."
     },
     "kitchen": {
         "noShoppingLists": "Nie ma jeszcze listy zakupów.",
@@ -753,6 +755,8 @@
         "searchCountCapped": "{{shown}} z {{total}} wyników",
         "title": "Kalendarz",
         "attachmentRemove": "Usuń załącznik",
+        "attachmentChangeRefused": "Nie możesz zmienić tego załącznika: dokument jest prywatny albo nie masz dostępu do dokumentów.",
+        "attachmentUploadRefused": "Załącznik może dodać tylko osoba, która może edytować dokumenty.",
         "newEvent": "Nowe wydarzenie",
         "editEvent": "Edytuj wydarzenie",
         "addEvent": "Dodaj wydarzenie",
@@ -1136,6 +1140,7 @@
         "phonePreview": "Podgląd: {{value}}",
         "phoneImplausible": "Ten numer wygląda na niekompletny - i tak zostanie zapisany.",
         "emailLabel": "E-mail",
+        "emailLockedHint": "Te adresy należą do konta tego członka. Zmienić je może tylko sam członek lub administrator.",
         "emailPlaceholder": "imie@przyklad.pl",
         "addressLabel": "Adres",
         "addressPlaceholder": "Ulica, kod pocztowy, miasto",
@@ -2171,6 +2176,7 @@
         "cardavErrorDuplicate": "Konto z tym adresem i tą nazwą użytkownika jest już połączone.",
         "cardavErrorAccountNotFound": "To konto już nie istnieje. Odśwież stronę.",
         "cardavErrorAddressbookNotFound": "Ta książka adresowa już nie istnieje. Odśwież książki adresowe.",
+        "cardavErrorPasswordRequired": "Dla innego serwera lub nazwy użytkownika wpisz hasło ponownie.",
         "syncPartiallyFailed": "Ostatni przebieg z błędami",
         "syncErrorDetail": "Ostatni przebieg: {{error}}",
         "cardavEditAccount": "Edytuj konto CardDAV",
@@ -2567,16 +2573,24 @@
             "defaultAssigneeHint": "Nowo zsynchronizowane wydarzenia są automatycznie przypisywane do tej osoby.",
             "defaultAssigneeRoutingHint": "Domyślne przypisanie: wydarzenia z kalendarza otrzymują wybraną tam osobę, a nowe wydarzenie przypisane tylko tej osobie jest tworzone w tym kalendarzu. Dotyczy kalendarzy Google i CalDAV, nie Apple ani Outlook.",
             "backfillTitle": "Uzupełnij przypisania",
-            "backfillDescription": "Domyślne przypisanie dotyczy tylko terminów pobranych po jego ustawieniu. Tutaj możesz jednorazowo zastosować je do terminów już pobranych ze wszystkich kont. Terminy, które są już komuś przypisane, pozostają bez zmian.",
+            "backfillDescription": "Domyślne przypisanie dotyczy tylko terminów pobranych po jego ustawieniu. Tutaj możesz jednorazowo zastosować je do terminów już pobranych ze wszystkich kont. Terminy bez przypisania otrzymują je od razu. Terminy, które wciąż mają domyślne przypisanie innego kalendarza, są pokazane pojedynczo do wyboru. Każde inne przypisanie pozostaje bez zmian.",
             "backfillAction": "Zastosuj do istniejących terminów",
             "backfillQuestion": "Przypisać {{count}} terminów bez przypisania?",
             "backfillQuestion_one": "Przypisać {{count}} termin bez przypisania?",
             "backfillDetail": "Każdy termin otrzyma domyślne przypisanie swojego kalendarza. Dotyczy to także terminów, z których ktoś ręcznie usunął przypisanie. Cofnąć można to tylko termin po terminie.",
             "backfillConfirm": "Przypisz",
-            "backfillNone": "W kalendarzach z domyślnym przypisaniem nie ma terminów bez przypisania.",
+            "backfillNone": "Nie ma terminów, do których można zastosować domyślne przypisanie.",
             "backfillDone": "Przypisano {{count}} terminów.",
             "backfillDone_one": "Przypisano {{count}} termin.",
-            "backfillChanged": "Terminy zmieniły się od policzenia. Zastosuj ponownie."
+            "backfillChanged": "Terminy zmieniły się od policzenia. Zastosuj ponownie.",
+            "backfillFillCount": "Terminy bez przypisania: {{count}}",
+            "backfillFillCount_one": "{{count}} termin bez przypisania",
+            "backfillMovedTitle": "Terminy z domyślnym przypisaniem innego kalendarza",
+            "backfillMovedHint": "Te terminy wciąż mają domyślne przypisanie innego kalendarza tego samego konta. Może to być przeniesiony termin albo kalendarz, którego domyślne przypisanie zmieniono później. Zmieniają się tylko zaznaczone terminy, pozostałe zostają bez zmian.",
+            "backfillMovedPartial": "Terminy od {{first}} do {{last}} z {{total}}. „Przypisz” stosuje wybór z tej strony, „Pokaż następne” przechodzi dalej bez stosowania. Niezaznaczone terminy pozostają bez zmian.",
+            "backfillMovedNext": "Pokaż następne",
+            "backfillMovedAll": "Zaznacz wszystkie",
+            "backfillMovedChange": "Z {{from}} na {{to}}"
         },
         "calendarDefaultsTitle": "Domyślne ustawienia nowych wydarzeń",
         "calendarDefaultsDescription": "Ustawienia stosowane automatycznie do nowych wydarzeń.",
@@ -2796,6 +2810,9 @@
         "backupRestoreErrorKeyInvalid": "Klucz nie dotarł do serwera w czytelnej postaci. Wpisz go ponownie i przywróć jeszcze raz. Nic tu nie zostało zmienione.",
         "backupRestoreErrorOwnKeyMissing": "Ta instalacja nie ma DB_ENCRYPTION_KEY, więc nie może otworzyć kopii zapasowej. Ustaw DB_ENCRYPTION_KEY, uruchom ponownie Yuvomi, a potem przywróć z kluczem kopii.",
         "backupRestoreErrorDamaged": "Kopia zapasowa jest uszkodzona lub niekompletna; klucz jest poprawny. Pobierz plik ponownie, porównaj rozmiar i sha256sum z oryginałem i przywróć tę kopię. Nic tu nie zostało zmienione.",
+        "backupRestoreErrorCorrupt": "Kopia zapasowa jest uszkodzona lub niekompletna. Pobierz plik ponownie, porównaj rozmiar i sha256sum z oryginałem i przywróć tę kopię albo użyj starszej kopii zapasowej. Nic tu nie zostało zmienione.",
+        "backupRestoreErrorInProgress": "Na tej instalacji trwa już przywracanie. Poczekaj, aż się zakończy, i sprawdź, która kopia zapasowa jest wgrana, zanim przywrócisz ponownie. To żądanie niczego nie zmieniło.",
+        "backupRestoreErrorBusy": "Yuvomi jest jeszcze zajęte, na przykład synchronizacją lub kopią zapasową, więc przywracanie się nie rozpoczęło. Nic tu nie zostało zmienione. Spróbuj ponownie za chwilę.",
         "backupRestoreErrorUnreadable": "Nie udało się odczytać kopii zapasowej. Sprawdź, czy plik jest kompletny, i spróbuj ponownie; dokładna przyczyna jest w logu serwera. Nic tu nie zostało zmienione.",
         "backupRestoreErrorGeneric": "Przywracanie nie powiodło się. Dokładna przyczyna jest w logu serwera.",
         "backupRestoreErrorNeverEncrypted": "Jeśli plik nigdy nie był zaszyfrowany, nie jest prawidłową bazą danych Yuvomi.",
@@ -2828,6 +2845,8 @@
         "orDivider": "lub",
         "ssoError": "Logowanie SSO nie powiodło się. Spróbuj ponownie.",
         "ssoNoAccount": "Dla tego logowania SSO nie ma tu jeszcze konta. Skontaktuj się z administratorem swojego gospodarstwa domowego.",
+        "ssoEmailAmbiguous": "Twój adres e-mail należy tu do kilku kont, dlatego logowania SSO nie można przypisać do żadnego z nich. Skontaktuj się z administratorem swojego gospodarstwa domowego.",
+        "ssoLinkRequired": "Dla Twojego adresu e-mail istnieje tu już konto z hasłem. Zaloguj się nim i powiąż SSO w Ustawienia → Konto albo skontaktuj się z administratorem swojego gospodarstwa domowego.",
         "forgotPassword": "Nie pamiętasz hasła?",
         "networkError": "Połączenie nie powiodło się. Sprawdź, czy serwer działa, i spróbuj ponownie.",
         "capsLockWarning": "Caps Lock jest włączony.",
@@ -3582,8 +3601,7 @@
         "currentMonth": "Bieżący",
         "noVisitReportsInMonth": "Brak zarejestrowanych wizyt personelu w okresie {{month}}.",
         "settledAdminOnly": "Zmienić lub usunąć może tylko admin",
-        "reportVisitsCount": "Wizyty",
-        "receiptPresent": "Dołączony"
+        "reportVisitsCount": "Wizyty"
     },
     "splitExpenses": {
         "title": "Wspólne wydatki",
@@ -3682,7 +3700,8 @@
             "recurring_paused": "Cykliczny wydatek wstrzymany",
             "recurring_resumed": "Cykliczny wydatek wznowiony",
             "recurring_generated": "Cykliczny wydatek wygenerowany",
-            "payment_reversed": "Płatność stornowana"
+            "payment_reversed": "Płatność stornowana",
+            "ledger_restored": "Księgowanie przywrócone"
         },
         "splitPercentage": "Procent",
         "splitExact": "Dokładna kwota",
@@ -5484,7 +5503,7 @@
         "openAction": "Otwórz {{name}}",
         "limitReached": "Maksymalnie dokumentów: {{count}}.",
         "limitReached_one": "Maksymalnie dokumentów: {{count}}.",
-        "presentHidden": "Dołączony"
+        "lockedPrivate": "Załącznik istnieje (prywatny)"
     },
     "join": {
         "title": "Skonfiguruj konto",

@@ -46,6 +46,7 @@
         "errorForbidden": "Acceso denegado. Por favor, inicia sesión de nuevo.",
         "errorNotFound": "No se encontró el registro.",
         "errorServer": "Error del servidor. Por favor, inténtalo más tarde.",
+        "errorRestoreInProgress": "Se está restaurando una copia de seguridad en este momento. Tu cambio no se ha guardado, inténtalo de nuevo en un minuto.",
         "errorTimeout": "La conexión tardó demasiado. Por favor, inténtalo de nuevo.",
         "requiredFields": "Completa todos los campos obligatorios.",
         "invalidInput": "Entrada no válida.",
@@ -61,7 +62,8 @@
             "hint": "Controla quién puede ver esta entrada en Yuvomi.",
             "assigneesNobodyHint": "Si no asignas a nadie, solo tú verás esta entrada."
         },
-        "toShoppingListNamed": "Añadir {{title}} a la lista de la compra"
+        "toShoppingListNamed": "Añadir {{title}} a la lista de la compra",
+        "emailInUse": "Esta dirección de correo ya pertenece a otra cuenta."
     },
     "kitchen": {
         "noShoppingLists": "Todavía no hay lista de la compra.",
@@ -741,6 +743,8 @@
         "searchCountCapped": "{{shown}} de {{total}} resultados",
         "title": "Calendario",
         "attachmentRemove": "Quitar archivo adjunto",
+        "attachmentChangeRefused": "No puedes cambiar este adjunto: el documento es privado o no tienes acceso a los documentos.",
+        "attachmentUploadRefused": "Solo quien puede editar documentos puede añadir un adjunto.",
         "newEvent": "Nuevo evento",
         "editEvent": "Editar evento",
         "addEvent": "Añadir evento",
@@ -1123,6 +1127,7 @@
         "phonePreview": "Vista previa: {{value}}",
         "phoneImplausible": "Este número parece incompleto - se guardará igualmente.",
         "emailLabel": "Email",
+        "emailLockedHint": "Estas direcciones pertenecen a la cuenta de este miembro. Solo el propio miembro o un administrador puede cambiarlas.",
         "emailPlaceholder": "nombre@ejemplo.es",
         "addressLabel": "Dirección",
         "addressPlaceholder": "Calle, código postal, ciudad",
@@ -1939,6 +1944,7 @@
         "cardavErrorDuplicate": "Ya hay una cuenta conectada con esta dirección y este usuario.",
         "cardavErrorAccountNotFound": "Esta cuenta ya no existe. Vuelve a cargar la página.",
         "cardavErrorAddressbookNotFound": "Esta libreta de direcciones ya no existe. Actualiza las libretas.",
+        "cardavErrorPasswordRequired": "Para otro servidor u otro nombre de usuario, vuelve a introducir la contraseña.",
         "syncPartiallyFailed": "El último intento tuvo errores",
         "syncErrorDetail": "Último intento: {{error}}",
         "cardavEditAccount": "Editar cuenta CardDAV",
@@ -2555,16 +2561,24 @@
             "defaultAssigneeHint": "Los eventos recién sincronizados se asignan automáticamente a esta persona.",
             "defaultAssigneeRoutingHint": "Asignación predeterminada: los eventos de un calendario reciben a la persona elegida allí, y un evento nuevo asignado solo a esa persona se crea en ese calendario. Se aplica a calendarios de Google y CalDAV, no a Apple ni Outlook.",
             "backfillTitle": "Completar asignaciones",
-            "backfillDescription": "La asignación predeterminada solo se aplica a las citas importadas después de configurarla. Aquí puedes aplicarla una vez a las citas ya importadas de todas las cuentas. Las citas que ya están asignadas a alguien no cambian.",
+            "backfillDescription": "La asignación predeterminada solo se aplica a las citas importadas después de configurarla. Aquí puedes aplicarla una vez a las citas ya importadas de todas las cuentas. Las citas sin asignar la reciben directamente. Las citas que aún llevan la asignación predeterminada de otro calendario aparecen una a una para que elijas. Cualquier otra asignación no cambia.",
             "backfillAction": "Aplicar a las citas existentes",
             "backfillQuestion": "¿Asignar {{count}} citas sin asignar?",
             "backfillQuestion_one": "¿Asignar {{count}} cita sin asignar?",
             "backfillDetail": "Cada cita recibe la asignación predeterminada de su calendario. Esto incluye citas cuya asignación alguien quitó a mano. Solo se puede deshacer cita por cita.",
             "backfillConfirm": "Asignar",
-            "backfillNone": "No hay citas sin asignar en calendarios con asignación predeterminada.",
+            "backfillNone": "No hay citas a las que aplicar una asignación predeterminada.",
             "backfillDone": "{{count}} citas asignadas.",
             "backfillDone_one": "{{count}} cita asignada.",
-            "backfillChanged": "Las citas cambiaron desde que se contaron. Vuelve a aplicarlo."
+            "backfillChanged": "Las citas cambiaron desde que se contaron. Vuelve a aplicarlo.",
+            "backfillFillCount": "{{count}} citas sin asignar",
+            "backfillFillCount_one": "{{count}} cita sin asignar",
+            "backfillMovedTitle": "Citas con la asignación predeterminada de otro calendario",
+            "backfillMovedHint": "Estas citas aún llevan la asignación predeterminada de otro calendario de la misma cuenta. Puede ser una cita que se movió o un calendario cuya asignación predeterminada se cambió después. Solo cambian las citas seleccionadas; las demás se quedan como están.",
+            "backfillMovedPartial": "Citas {{first}} a {{last}} de {{total}}. «Asignar» aplica la selección de esta página, «Mostrar siguientes» avanza sin aplicarla. Las citas no seleccionadas no cambian.",
+            "backfillMovedNext": "Mostrar siguientes",
+            "backfillMovedAll": "Seleccionar todas",
+            "backfillMovedChange": "De {{from}} a {{to}}"
         },
         "calendarDefaultsTitle": "Valores predeterminados para nuevos eventos",
         "calendarDefaultsDescription": "Ajustes que se aplican automáticamente a los nuevos eventos.",
@@ -2784,6 +2798,9 @@
         "backupRestoreErrorKeyInvalid": "La clave no llegó al servidor de forma legible. Introdúcela de nuevo y vuelve a restaurar. Aquí no se ha cambiado nada.",
         "backupRestoreErrorOwnKeyMissing": "Esta instalación no tiene DB_ENCRYPTION_KEY, así que no puede abrir la copia de seguridad. Define DB_ENCRYPTION_KEY, reinicia Yuvomi y luego restaura con la clave de la copia.",
         "backupRestoreErrorDamaged": "La copia de seguridad está dañada o incompleta; la clave es correcta. Vuelve a obtener el archivo, compara su tamaño y sha256sum con el original y restaura esa copia. Aquí no se ha cambiado nada.",
+        "backupRestoreErrorCorrupt": "La copia de seguridad está dañada o incompleta. Vuelve a obtener el archivo, compara su tamaño y sha256sum con el original y restaura esa copia, o usa una copia de seguridad anterior. Aquí no se ha cambiado nada.",
+        "backupRestoreErrorInProgress": "Ya hay una restauración en curso en esta instalación. Espera a que termine y comprueba qué copia de seguridad está activa antes de restaurar de nuevo. Esta solicitud no ha cambiado nada.",
+        "backupRestoreErrorBusy": "Yuvomi todavía está ocupado, por ejemplo con una sincronización o una copia de seguridad, así que la restauración no ha empezado. Aquí no se ha cambiado nada. Inténtalo de nuevo en un momento.",
         "backupRestoreErrorUnreadable": "No se pudo leer la copia de seguridad. Comprueba que el archivo esté completo e inténtalo de nuevo; la causa exacta está en el registro del servidor. Aquí no se ha cambiado nada.",
         "backupRestoreErrorGeneric": "La restauración ha fallado. La causa exacta está en el registro del servidor.",
         "backupRestoreErrorNeverEncrypted": "Si el archivo nunca se cifró, no es una base de datos válida de Yuvomi.",
@@ -2816,6 +2833,8 @@
         "orDivider": "o",
         "ssoError": "Error al iniciar sesión con SSO. Inténtalo de nuevo.",
         "ssoNoAccount": "Todavía no hay ninguna cuenta aquí para este inicio de sesión con SSO. Ponte en contacto con la administración de tu hogar.",
+        "ssoEmailAmbiguous": "Tu dirección de correo pertenece aquí a varias cuentas, por lo que el inicio de sesión con SSO no se puede asignar a ninguna. Ponte en contacto con la administración de tu hogar.",
+        "ssoLinkRequired": "Aquí ya existe una cuenta con contraseña para tu dirección de correo. Inicia sesión con ella y vincula el SSO en Ajustes → Cuenta, o ponte en contacto con la administración de tu hogar.",
         "forgotPassword": "¿Olvidaste la contraseña?",
         "networkError": "Error de conexión. Comprueba que el servidor esté funcionando e inténtalo de nuevo.",
         "capsLockWarning": "El bloqueo de mayúsculas está activado.",
@@ -3578,8 +3597,7 @@
         "currentMonth": "Este mes",
         "noVisitReportsInMonth": "No se registró ningún servicio en {{month}}.",
         "settledAdminOnly": "Solo un administrador puede modificarlo o eliminarlo",
-        "reportVisitsCount": "Visitas",
-        "receiptPresent": "Adjunto"
+        "reportVisitsCount": "Visitas"
     },
     "userMultiSelect": {
         "moreUsers": "más",
@@ -3682,7 +3700,8 @@
             "recurring_paused": "Gasto recurrente pausado",
             "recurring_resumed": "Gasto recurrente reanudado",
             "recurring_generated": "Gasto recurrente generado",
-            "payment_reversed": "Pago anulado"
+            "payment_reversed": "Pago anulado",
+            "ledger_restored": "Asiento restaurado"
         },
         "splitPercentage": "Porcentaje",
         "splitExact": "Importe exacto",
@@ -5484,7 +5503,7 @@
         "openAction": "Abrir {{name}}",
         "limitReached": "Como máximo {{count}} documentos.",
         "limitReached_one": "Como máximo {{count}} documento.",
-        "presentHidden": "Adjunto"
+        "lockedPrivate": "Adjunto presente (privado)"
     },
     "join": {
         "title": "Configura tu cuenta",

@@ -296,9 +296,9 @@ docker compose up -d
 Docker pulls `ghcr.io/ulsklyc/yuvomi:latest` automatically. No build step, no Node.js installation needed.
 
 > **Pinning a version.** Every release is also published under immutable tags:
-> `2.68.0` (exact version), `2.68` (latest patch of that minor), plus a moving `main`
+> `2.69.1` (exact version), `2.69` (latest patch of that minor), plus a moving `main`
 > tag for the current development state. To pin production to a known-good release,
-> set `image: ghcr.io/ulsklyc/yuvomi:2.68.0` in your compose file and bump it
+> set `image: ghcr.io/ulsklyc/yuvomi:2.69.1` in your compose file and bump it
 > deliberately; `latest` always points at the newest release.
 
 > **Verifying what you pull.** Every image the publish workflow builds is signed at build
@@ -307,7 +307,7 @@ Docker pulls `ghcr.io/ulsklyc/yuvomi:latest` automatically. No build step, no No
 > image you are about to run is one GitHub built from a release tag of this repository:
 >
 > ```bash
-> cosign verify ghcr.io/ulsklyc/yuvomi:2.68.0 \
+> cosign verify ghcr.io/ulsklyc/yuvomi:2.69.1 \
 >   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
 >   --certificate-identity-regexp '^https://github.com/ulsklyc/yuvomi/.github/workflows/docker-publish.yml@refs/tags/v'
 > ```
@@ -316,7 +316,7 @@ Docker pulls `ghcr.io/ulsklyc/yuvomi:latest` automatically. No build step, no No
 > anything else means the image is not one this repository released. The `main` tag is
 > signed too, under `refs/heads/main`, which the pattern above deliberately excludes. Tags
 > published before September 2026 carry no signature. Provenance and SBOM travel inside the
-> image: `docker buildx imagetools inspect ghcr.io/ulsklyc/yuvomi:2.68.0 --format '{{ json .Provenance }}'`.
+> image: `docker buildx imagetools inspect ghcr.io/ulsklyc/yuvomi:2.69.1 --format '{{ json .Provenance }}'`.
 
 Continue with [Step 4 — Verify](#4-verify-the-container-is-running).
 
@@ -361,7 +361,7 @@ docker compose logs -f
 You should see output like:
 
 ```
-yuvomi  | [Yuvomi] Server running on port 3000 | Version 2.68.0
+yuvomi  | [Yuvomi] Server running on port 3000 | Version 2.69.1
 yuvomi  | [Yuvomi] Environment: production
 yuvomi  | [Sync] Auto-sync active every 15 minutes.
 ```
@@ -984,15 +984,20 @@ Pocket ID documents Yuvomi as one of its [client examples](https://pocket-id.org
 | `OIDC_ALLOW_SIGNUP` | Set to `false` so an SSO sign-in never provisions a new account. Sign-in and account linking are unaffected, so the admin creates the account and the user signs in with SSO. Use this when your identity provider serves more people than this household. | `true` | No |
 | `AUTH_ALLOW_PASSWORD_LOGIN` | Set to `false` to make SSO the only way in: the login form, password login and password reset are all switched off. Ignored until all four OIDC variables are set **and** at least one administrator account is linked to the provider, so a typo - or a fresh install - can never lock everyone out. | `true` | No |
 
-When all four OIDC variables are set, a **"Sign in with SSO"** button appears on the login page. The flow uses Authorization Code + PKCE (S256) with a nonce. On first login, the user is matched by their OIDC `sub`. If no match exists, an existing local account is linked automatically **only when the provider reports a verified email (`email_verified: true`) and exactly one local account holds that email address**; otherwise a new account is provisioned. Unverified or ambiguous emails never take over an existing account. If your provider omits the `email_verified` claim, set `OIDC_TRUST_EMAIL_WITHOUT_VERIFIED_CLAIM=true` to enable linking.
+When all four OIDC variables are set, a **"Sign in with SSO"** button appears on the login page. The flow uses Authorization Code + PKCE (S256) with a nonce. On first login, the user is matched by their OIDC `sub`. If no match exists, an existing local account is linked automatically **only when the provider reports a verified email (`email_verified: true`), exactly one account not yet linked holds that email address, and that address can only have been set by an admin** - that is, the account has no password ("SSO sign-in only", see below) or it is an admin account. Guests of shared expenses are never linked this way and do not count. Two things are refused instead of guessed, and neither creates an account:
 
-**Who gets an account.** By default every identity your provider accepts gets one on first sign-in - convenient for a provider you run for this household alone, but a directory is a list of people, not a list of household members. Set `OIDC_ALLOW_SIGNUP=false` and provisioning stops: an unknown identity is turned away with "There is no account here yet for this SSO sign-in" instead of the generic SSO error, while known accounts sign in as before. Linking still happens too, which is what makes the switch usable: create the account under **Settings → Administration → Family** with the member's email address, and their first SSO sign-in binds the two together (the provider must report `email_verified: true`, or the account owner links it themselves under **Settings → Account → Single sign-on**).
+- **The address is on more than one account.** The sign-in is refused with "Your email address belongs to more than one account here"; keep the address on one account only (Settings → Administration → Family) and have the person sign in again.
+- **The address belongs to a member account that has a password.** A member maintains their own address and could enter someone else's, so the first SSO sign-in of that other person would land in the member's account. The sign-in is refused with a message that points to the fix: the person signs in with their password and links SSO under **Settings → Account → Single sign-on**, or an admin switches the account to "SSO sign-in only" under **Settings → Administration → Family**, after which the next SSO sign-in links it.
+
+Unverified emails never take over an existing account; without a match a new account is provisioned (unless `OIDC_ALLOW_SIGNUP=false`). If your provider omits the `email_verified` claim, set `OIDC_TRUST_EMAIL_WITHOUT_VERIFIED_CLAIM=true` to enable linking. A member cannot set an email address on their own profile, their own contact or a shared-expense guest that already belongs to another account; an admin can, for example for a shared family mailbox, and SSO then treats that address as ambiguous.
+
+**Who gets an account.** By default every identity your provider accepts gets one on first sign-in - convenient for a provider you run for this household alone, but a directory is a list of people, not a list of household members. Set `OIDC_ALLOW_SIGNUP=false` and provisioning stops: an unknown identity is turned away with "There is no account here yet for this SSO sign-in" instead of the generic SSO error, while known accounts sign in as before. Linking still happens too, which is what makes the switch usable: create the account under **Settings → Administration → Family** with the member's email address and "SSO sign-in only" switched on, and their first SSO sign-in binds the two together (the provider must report `email_verified: true`, or the account owner links it themselves under **Settings → Account → Single sign-on**).
 
 **Making SSO the only way in.** Even with SSO configured, Yuvomi keeps a second door open: the login form stays, password reset stays, and every account carries a password hash. Set `AUTH_ALLOW_PASSWORD_LOGIN=false` and that door closes - the login page shows nothing but the SSO button, `POST /auth/login` is refused outright (the rule sits on the route, not just on the page), and password reset disappears with it rather than staying as a route that can still send mail. **One exception is offered, and only where it applies (#962):** guests of shared expenses stay exempt from the switch, because they are external people with no entry in your identity provider, so a household that has such guests keeps a second button for them. A household that has none sees no second button - it used to appear regardless, which looked like a hole in the bolt you had just closed.
 
 Three things are deliberate:
 
-- **The switch only takes effect once somebody can actually get in through SSO.** Two conditions: all four OIDC variables set, and at least one administrator account already linked to the provider. Until then password login stays on and the server says so on startup. The second condition is what makes a fresh install work - it creates its first administrator through `/setup` with a password, and that account would otherwise be dead the moment it was created, with `/setup` closed behind it. Sign in once through SSO to link the admin account, and the switch takes hold from then on.
+- **The switch only takes effect once somebody can actually get in through SSO.** Two conditions: all four OIDC variables set, and at least one administrator account already linked to the provider. Until then password login stays on and the server says so on startup. The second condition is what makes a fresh install work - it creates its first administrator through `/setup` with a password, and that account would otherwise be dead the moment it was created, with `/setup` closed behind it. Sign in once through SSO to link the admin account (an admin account links through its verified email address; otherwise use **Settings → Account → Single sign-on**), and the switch takes hold from then on. Members who still have a password link the same way before the switch takes hold, or an admin switches their accounts to "SSO sign-in only".
 - **Invitations adapt.** While the switch is in effect, accepting an invitation creates an account with no password, linked on first SSO sign-in through the invitation's email address. An invitation without an email address is refused rather than consumed into an account nobody can reach.
 - **Existing passwords are not touched.** Setting the variable back to `true` restores the form exactly as it was. Removing a password is a per-account decision instead: **Settings → Administration → Family** offers "SSO sign-in only" both when creating a member and when editing one. An account switched this way carries a placeholder no password can ever match; switching it back requires setting a new password in the same step, so the account is never left with no way in at all.
 - **Recovery is a documented `.env` change.** If the identity provider becomes unreachable, remove the line and restart. A break-glass admin account with a password would defeat the point of the switch, so there is none.
@@ -1001,7 +1006,7 @@ Three things are deliberate:
 
 **Username of a newly provisioned account.** The name is taken from the first claim that yields something usable: `preferred_username`, then the non-standard `username` claim (Synology DSM SSO sends the plain account name there, where `sub` still carries the directory part), then `sub`. The email address is deliberately not a candidate: a household often shares one address across several members, so it identifies nobody, and its domain part only makes the name unwieldy. Whichever claim wins is reduced to the format every username in Yuvomi follows (`a-z A-Z 0-9 . _ -`, 3 to 64 characters), with accents transliterated and anything else turned into a hyphen. Admins can rename the account afterwards under **Settings → Administration → Family**; sign-in keeps working either way, because the identity hangs on `sub`, not on the name.
 
-**Linking an existing account yourself.** A matching *username* deliberately never links: anyone who names themselves `admin` at the identity provider would otherwise take over the local admin account. If neither the `sub` nor a verified email matches, the first SSO sign-in therefore creates a separate account - same name with a numeric suffix (`test1-1`), and the original account's data stays where it is. The way to merge the two is to sign in locally and open **Settings → Account → Single sign-on**, where "Link SSO account" runs the same provider flow and binds the resulting `sub` to the account you are signed in as. Being signed in is the point: the session names the local account and the provider names the remote one, which together prove ownership of both. Linking is refused when that `sub` already belongs to another account. The same card removes a link again - except on an account that was created through SSO, because it holds no password and the link is its only way in; set a password first.
+**Linking an existing account yourself.** A matching *username* deliberately never links: anyone who names themselves `admin` at the identity provider would otherwise take over the local admin account. If neither the `sub` nor a verified email matches, the first SSO sign-in therefore creates a separate account - same name with a numeric suffix (`test1-1`), and the original account's data stays where it is. (A verified email that matches a member account with a password no longer does this: that sign-in is refused and names this card as the way in.) The way to merge the two is to sign in locally and open **Settings → Account → Single sign-on**, where "Link SSO account" runs the same provider flow and binds the resulting `sub` to the account you are signed in as. Being signed in is the point: the session names the local account and the provider names the remote one, which together prove ownership of both. Linking is refused when that `sub` already belongs to another account. The same card removes a link again - except on an account that was created through SSO, because it holds no password and the link is its only way in; set a password first.
 
 ### Subscription Currency Conversion (Optional)
 
@@ -1271,19 +1276,21 @@ Admins can restore a backup from **Settings → Administration → Backup and re
 SERVICE=yuvomi
 BACKUP="$PWD/yuvomi-backup-20260401.db"
 docker compose stop "$SERVICE"
-docker compose run --rm -v "$BACKUP:/tmp/yuvomi-restore.db:ro" --entrypoint sh "$SERVICE" -c 'set -eu; target="${DB_PATH:-/data/yuvomi.db}"; case "$target" in */oikos.db) target="${target%/oikos.db}/yuvomi.db";; esac; stamp=$(date -u +%Y%m%dT%H%M%SZ); if [ -f "$target" ]; then cp "$target" "$target.pre-restore-$stamp"; fi; rm -f "$target-wal" "$target-shm"; cp /tmp/yuvomi-restore.db "$target"; chown node:node "$target" 2>/dev/null || true'
+docker compose run --rm -v "$BACKUP:/tmp/yuvomi-restore.db:ro" --entrypoint sh "$SERVICE" -c 'set -eu; node server/check-backup.js /tmp/yuvomi-restore.db; target="${DB_PATH:-/data/yuvomi.db}"; case "$target" in */oikos.db) target="${target%/oikos.db}/yuvomi.db";; esac; stamp=$(date -u +%Y%m%dT%H%M%SZ); if [ -f "$target" ]; then cp "$target" "$target.pre-restore-$stamp.0.partial"; sync; mv "$target.pre-restore-$stamp.0.partial" "$target.pre-restore-$stamp"; fi; staging="$target.restore-tmp-0-$stamp"; cp /tmp/yuvomi-restore.db "$staging"; chmod 600 "$staging" 2>/dev/null || true; chown node:node "$staging" 2>/dev/null || true; sync; if [ -f "$target-wal" ]; then if [ -s "$target" ]; then mv "$target-wal" "$target.pre-restore-$stamp-wal"; else mv "$target-wal" "$target.pre-restore-$stamp.wal-kept"; fi; fi; rm -f "$target-shm"; mv "$staging" "$target"; sync'
 docker compose up -d "$SERVICE"
 ```
 
 If your Compose service is renamed, set `SERVICE` to that name, for example `SERVICE=familyplanner`.
 
-For a local CLI restore outside Docker, set the same environment variables used by the app and run:
+The command first checks the backup the same way a restore from the settings page does (it has to open with this installation's `DB_ENCRYPTION_KEY`, every page is checked, and a backup from a newer Yuvomi is refused) and stops before changing anything if the check fails. If you are switching `DB_ENCRYPTION_KEY` to the key of the installation that wrote the backup, change it in `.env` before running the command, so the check opens the backup with it. The command then copies the backup next to the database and only then moves it over the database file in one step; Yuvomi removes a leftover copy on its next start. `docker compose stop` does not fold the write-ahead log into the database file, so the last changes may still be in `yuvomi.db-wal`: the command moves that file next to the pre-restore copy (as `yuvomi.db.pre-restore-<stamp>-wal`, where SQLite picks it up when the copy is opened) instead of deleting it. If the database file itself is empty (0 bytes, see the start-up message about an empty database file), the log goes to `yuvomi.db.pre-restore-<stamp>.wal-kept` instead: SQLite discards a `-wal` next to an empty file the first time that file is opened, even just for reading. An interrupted restore leaves the old database in place; only if it stops between moving the log and moving the backup in are the last changes found with the pre-restore copy instead. The restored file gets mode `0600` and the owner `node`, whatever mode the backup file had (a backup on read-only media is often `0444`, and a database with that mode could not be written). On a data volume that does not allow changing modes (some SMB or FUSE mounts on a NAS), that step is skipped and the permissions of the mount apply; the command runs as root in the container, so it cannot tell from there whether the file is writable for Yuvomi. `DB_PATH` must be a regular file, not a symlink: the restore replaces the file at that path, so a symlink there would be replaced by the restored file instead of being followed.
+
+For a local CLI restore outside Docker, stop Yuvomi first, set the same environment variables used by the app and run it as the user Yuvomi runs as (or as root; the restored file must stay writable for the user or group that could write the current database, and the restore stops before replacing anything if it cannot make it so):
 
 ```bash
 DB_PATH=/path/to/yuvomi.db node --import dotenv/config scripts/restore-backup.js ./yuvomi-backup-20260401.db
 ```
 
-The restore helper validates that the file is a Yuvomi database, and refuses one written by a newer Yuvomi than the one running (update first, then restore), before replacing the active database. It also keeps a pre-restore copy next to the database file for emergency rollback.
+The restore helper validates that the file is a Yuvomi database and undamaged (every page is checked), and refuses one written by a newer Yuvomi than the one running (update first, then restore), before replacing the active database. The replacement is written next to the database file and swapped in with a single rename, so an interrupted restore leaves the old database in place. It also keeps a pre-restore copy next to the database file for emergency rollback. The CLI restore is not coordinated with a running server - a restore from the settings page at the same time, or the server's open connection to the replaced file, would work against it - so run it only while Yuvomi is stopped.
 
 ### Moving to a new server (backup from another installation)
 

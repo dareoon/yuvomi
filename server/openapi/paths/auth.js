@@ -177,7 +177,12 @@ export function authPaths() {
         summary: 'Handle OIDC callback',
         tag: 'Auth',
         auth: false,
-        description: 'Consumes the OIDC callback, validates state/nonce/PKCE, creates or finds the linked user, establishes a session, and redirects back to the app. With OIDC_ALLOW_SIGNUP=false an identity that matches no existing account is redirected to /login?error=oidc_signup_disabled instead of being provisioned.',
+        description: 'Consumes the OIDC callback, validates state/nonce/PKCE, creates or finds the linked user, establishes a session, and redirects back to the app. '
+          + 'An identity without a linked account is matched by its verified email address against accounts not yet linked (split-expense guests excluded). '
+          + 'It links only an account whose address nobody but an admin can have set: an account without a password (SSO-only) or an admin account. '
+          + 'Two or more matching accounts redirect to /login?error=oidc_email_ambiguous; a single matching member account that has a password redirects to /login?error=oidc_link_required, and that member links SSO while signed in (POST /api/v1/auth/oidc/link/start). '
+          + 'Neither case creates or links an account, whatever OIDC_ALLOW_SIGNUP says. '
+          + 'With OIDC_ALLOW_SIGNUP=false an identity that matches no existing account is redirected to /login?error=oidc_signup_disabled instead of being provisioned.',
         responses: {
           302: { description: 'Redirect to app or login error page' },
         },
@@ -228,7 +233,9 @@ export function authPaths() {
       post: op({
         summary: 'Request a password-reset link',
         description: 'Always responds 200 with a generic body to prevent account enumeration. '
-          + 'A reset email is sent only when the account exists, has a linked email, SMTP is configured, and BASE_URL is set.',
+          + 'A reset email is sent only when the account exists, has a linked email, SMTP is configured, and BASE_URL is set. '
+          + 'The response is sent before the account is looked up; the lookup and the email run afterwards in the background, so the response time does not reveal whether the account exists. '
+          + 'An email address matches regardless of surrounding whitespace and capitalisation; if it belongs to more than one account, no email is sent (guests of shared expenses do not count towards that), so such accounts reset by username.',
         tag: 'Auth',
         auth: false,
         requestBody: {
@@ -411,8 +418,16 @@ export function authPaths() {
       patch: op({
         summary: 'Update current user profile',
         tag: 'Auth',
+        description: 'An address that already belongs to another account (primary or additional address, compared without surrounding whitespace and ASCII letter case; guests of shared expenses do not count) is refused with 409 and `reason: "email_in_use"` when the caller is not an admin. Only newly introduced addresses are checked, so saving an unchanged address stays possible.',
         stateChanging: true,
         requestBody: jsonBody('#/components/schemas/ProfileUpdateRequest'),
+        responses: {
+          200: { description: 'Successful response' },
+          400: { $ref: '#/components/responses/BadRequest' },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          409: { description: 'The email address already belongs to another account (`reason: "email_in_use"`)' },
+          500: { $ref: '#/components/responses/InternalServerError' },
+        },
       }),
     },
     '/api/v1/auth/users': {

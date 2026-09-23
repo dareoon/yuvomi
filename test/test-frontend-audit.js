@@ -10145,6 +10145,32 @@ test('split activity feed translates every type the backend writes', () => {
     'server/routes/split-expenses.js': read('../server/routes/split-expenses.js'),
     'server/services/split-expenses-scheduler.js': read('../server/services/split-expenses-scheduler.js'),
     'scripts/seed-demo.js': read('../scripts/seed-demo.js'),
+    // Migrationen, die selbst in expense_activity schreiben (v226:
+    // 'ledger_restored'). Gelesen wird jeder MIGRATIONS-Eintrag, der
+    // `INSERT INTO expense_activity` enthaelt - nicht die ganze db.js: dort
+    // stehen Listen wie IN ('expense', 'expense_reversal', ...) oder
+    // ('admin', 'member'), die das Regex als Typen laese.
+    ...(() => {
+      const db = read('../server/db.js');
+      const start = db.indexOf('const MIGRATIONS = [');
+      assert.ok(start !== -1, 'const MIGRATIONS = [ in server/db.js nicht gefunden');
+      const end = db.indexOf('\n];', start);
+      assert.ok(end !== -1, 'Ende von MIGRATIONS in server/db.js nicht gefunden');
+      const block = db.slice(start, end);
+      const entries = block.split(/\n  \{\n    version: /).slice(1);
+      // Jeder `version:`-Schluessel muss als eigener Eintrag zerlegt sein - ein
+      // anders formatierter Eintrag klebte sonst am Vorgaenger und fiele mit
+      // seinem Aktivitaetstyp still durch.
+      const versionKeys = (block.match(/\bversion:\s*\d+/g) || []).length;
+      assert.equal(entries.length, versionKeys, `MIGRATIONS-Zerlegung: ${entries.length} Eintraege, aber ${versionKeys} version-Schluessel`);
+      const writers = {};
+      for (const entry of entries) {
+        if (!entry.includes('INSERT INTO expense_activity')) continue;
+        writers[`server/db.js (v${entry.match(/^\d+/)[0]})`] = entry;
+      }
+      assert.ok(Object.keys(writers).length >= 1, 'keine Migration schreibt in expense_activity - Zerlegung von MIGRATIONS passt nicht mehr');
+      return writers;
+    })(),
   };
 
   // activity(groupId, actor, 'type', …) bzw. insertActivity(db, …, 'type', …).
@@ -14401,6 +14427,83 @@ test('ein Toast-Container hat genau einen Namensgeber', () => {
   // prueft der Guard die Abwesenheit eines Musters, das es nirgends mehr gibt.
   assert.ok(ownerHits >= 2,
     `Nur ${ownerHits} Toast-Region-Namen in ${OWNER} - beide Dringlichkeiten gehoeren dorthin.`);
+});
+
+// --------------------------------------------------------------------------
+// EIN VERSTECKTER DATEI-INPUT OHNE LABEL IST EIN WERKZEUG, KEIN FELD
+//
+// a11y-Runde: `#edit-member-avatar-file` hatte keinen Namen (axe `label`,
+// critical) und bekam als erstes Feld des Dialogs den Erstfokus; per
+// `.sr-only:focus-visible` erschien er als Streifen ueber dem Dialogkopf. Wer
+// einen `.sr-only`-Datei-Input ueber einen eigenen Knopf oeffnet (Vorschau,
+// Stift, "Hochladen"), gibt ihm einen Namen und nimmt ihn aus der Tab-Folge:
+// der Knopf ist der Weg, und modal.js ueberspringt `tabindex="-1"` beim
+// Erstfokus. Ein Input, den ein `<label for>` bedient (Dropzonen), bleibt in
+// der Tab-Folge - dort IST er der Tastaturweg.
+// --------------------------------------------------------------------------
+// `for="id"` als eigenes Attribut, nicht als Ende von `data-for` oder `aria-for`.
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const labelledFor = (src, id) => new RegExp(`(?<![\\w-])for="${escapeRegExp(id)}"`).test(src);
+
+test('die Ausnahme fuer <label for> greift nur am echten for-Attribut', () => {
+  assert.equal(labelledFor('<label for="zz4">', 'zz4'), true);
+  assert.equal(labelledFor('<div data-for="zz4">', 'zz4'), false, 'data-for ist kein Label');
+  assert.equal(labelledFor('<label for="zz45">', 'zz4'), false);
+});
+
+test('ein versteckter Datei-Input ohne <label for> ist benannt und ausser Tab-Folge', () => {
+  const offenders = [];
+  let seen = 0;
+  for (const rel of walkJsFiles('../public/')) {
+    const src = read(rel);
+    for (const [tag] of src.matchAll(/<input\b(?=[^>]*\btype="file")(?=[^>]*\bclass="[^"]*\bsr-only\b)[^>]*>/g)) {
+      seen += 1;
+      const id = tag.match(/\bid="([^"]+)"/)?.[1];
+      if (id && labelledFor(src, id)) continue;
+      // Ein leerer Name ist keiner: `aria-label=""` zaehlt nicht.
+      const named = /\baria-label(?:ledby)?="[^"]*[^"\s][^"]*"/.test(tag);
+      const untabbable = /\btabindex="-1"/.test(tag);
+      if (!named || !untabbable) {
+        offenders.push(`${rel}: ${id ?? tag.slice(0, 60)}${named ? '' : ' ohne Namen'}${untabbable ? '' : ' in der Tab-Folge'}`);
+      }
+    }
+  }
+  assert.ok(seen >= 8, `nur ${seen} versteckte Datei-Inputs gefunden - der Scan greift nicht`);
+  assert.deepEqual(offenders, []);
+});
+
+// --------------------------------------------------------------------------
+// DIE REGION SAGT AN, NICHT DER TOAST
+//
+// a11y-Runde: jeder Toast trug `role="alert"` (implizit `aria-live="assertive"`)
+// und stand dabei in einer Region, die selbst ansagt - auch in der hoeflichen.
+// Eine Erfolgsmeldung oder Erinnerung unterbrach damit die laufende Vorlesung,
+// und je nach Screenreader kam sie zweimal (einmal fuer die Region, einmal fuer
+// die Rolle). Die Dringlichkeit waehlt die Region (utils/toast-surface.js); ein
+// Toast darin traegt keine eigene Live-Rolle.
+// --------------------------------------------------------------------------
+test('ein Toast traegt keine eigene Live-Rolle - die Region sagt an', () => {
+  const offenders = [];
+  let creators = 0;
+  for (const rel of walkJsFiles('../public/')) {
+    const src = withoutCommentsKeepingLines(read(rel));
+    if (!/\btoastSurface\s*\(/.test(src)) continue;
+    // Jede Variable, die ein Toast wird: `x.className = 'toast ...'` oder als Template.
+    const names = new Set([...src.matchAll(/\b([A-Za-z_$][\w$]*)\.className\s*=\s*['"`]toast(?:\s|['"`]|\$)/g)].map((m) => m[1]));
+    creators += names.size;
+    src.split('\n').forEach((line, i) => {
+      for (const name of names) {
+        const own = new RegExp(`\\b${escapeRegExp(name)}\\.setAttribute\\(\\s*['"](?:role|aria-live)['"]`);
+        if (own.test(line)) offenders.push(`${rel}:${i + 1} ${line.trim()}`);
+      }
+    });
+  }
+  assert.ok(creators >= 2, `nur ${creators} Toast-Bauer gefunden - Shell und Erinnerungen bauen je einen`);
+  assert.deepEqual(offenders, [], 'ein Toast in einer Live-Region traegt eine eigene Live-Rolle');
+  // Die Regionen selbst sagen weiter an, jede mit ihrer Dringlichkeit.
+  const router = read('../public/router.js');
+  assert.match(router, /toastContainerPolite\.setAttribute\('aria-live', 'polite'\)/);
+  assert.match(router, /toastContainerAssertive\.setAttribute\('aria-live', 'assertive'\)/);
 });
 
 // --------------------------------------------------------------------------

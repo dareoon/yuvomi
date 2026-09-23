@@ -46,6 +46,7 @@
         "errorForbidden": "Åtkomst nekad. Logga in igen.",
         "errorNotFound": "Posten hittades inte.",
         "errorServer": "Serverfel. Försök igen senare.",
+        "errorRestoreInProgress": "En säkerhetskopia återställs just nu. Din ändring sparades inte, försök igen om en minut.",
         "errorTimeout": "Anslutningen tog för lång tid. Försök igen.",
         "requiredFields": "Fyll i alla obligatoriska fält.",
         "invalidInput": "Ogiltig inmatning.",
@@ -61,7 +62,8 @@
             "hint": "Styr vem som kan se den här posten i Yuvomi.",
             "assigneesNobodyHint": "Utan tilldelning ser bara du den här posten."
         },
-        "toShoppingListNamed": "Lägg till {{title}} i inköpslistan"
+        "toShoppingListNamed": "Lägg till {{title}} i inköpslistan",
+        "emailInUse": "Den här e-postadressen hör redan till ett annat konto."
     },
     "kitchen": {
         "noShoppingLists": "Det finns ingen inköpslista än.",
@@ -741,6 +743,8 @@
         "searchCountCapped": "{{shown}} av {{total}} resultat",
         "title": "Kalender",
         "attachmentRemove": "Ta bort bilaga",
+        "attachmentChangeRefused": "Du kan inte ändra den här bilagan: dokumentet är privat, eller så har du inte åtkomst till dokument.",
+        "attachmentUploadRefused": "Bara den som får redigera dokument kan lägga till en bilaga.",
         "newEvent": "Ny händelse",
         "editEvent": "Redigera händelse",
         "addEvent": "Lägg till händelse",
@@ -1123,6 +1127,7 @@
         "phonePreview": "Förhandsvisning: {{value}}",
         "phoneImplausible": "Det här numret verkar ofullständigt - det sparas ändå.",
         "emailLabel": "E-post",
+        "emailLockedHint": "De här adresserna hör till den här medlemmens konto. Bara medlemmen själv eller en administratör kan ändra dem.",
         "emailPlaceholder": "namn@exempel.se",
         "addressLabel": "Adress",
         "addressPlaceholder": "Gatunamn, Postnummer Stad",
@@ -1939,6 +1944,7 @@
         "cardavErrorDuplicate": "Ett konto med den här adressen och det här användarnamnet är redan anslutet.",
         "cardavErrorAccountNotFound": "Kontot finns inte längre. Ladda om sidan.",
         "cardavErrorAddressbookNotFound": "Adressboken finns inte längre. Uppdatera adressböckerna.",
+        "cardavErrorPasswordRequired": "En annan server eller ett annat användarnamn kräver lösenordet igen.",
         "syncPartiallyFailed": "Senaste körningen hade fel",
         "syncErrorDetail": "Senaste körningen: {{error}}",
         "cardavEditAccount": "Redigera CardDAV-konto",
@@ -2555,16 +2561,24 @@
             "defaultAssigneeHint": "Nyligen synkroniserade händelser tilldelas automatiskt den här personen.",
             "defaultAssigneeRoutingHint": "Standardtilldelning: händelser från en kalender får personen som valts där, och en ny händelse som bara är tilldelad den personen skapas i den kalendern. Gäller Google- och CalDAV-kalendrar, inte Apple eller Outlook.",
             "backfillTitle": "Fyll i tilldelningar",
-            "backfillDescription": "En standardtilldelning gäller bara möten som hämtats efter att den ställts in. Här kan du tillämpa den en gång på möten som redan hämtats från alla konton. Möten som redan är tilldelade någon lämnas orörda.",
+            "backfillDescription": "En standardtilldelning gäller bara möten som hämtats efter att den ställts in. Här kan du tillämpa den en gång på möten som redan hämtats från alla konton. Möten utan tilldelning får den direkt. Möten som fortfarande har en annan kalenders standardtilldelning visas ett och ett så att du kan välja. All annan tilldelning lämnas orörd.",
             "backfillAction": "Tillämpa på befintliga möten",
             "backfillQuestion": "Tilldela {{count}} möten utan tilldelning?",
             "backfillQuestion_one": "Tilldela {{count}} möte utan tilldelning?",
             "backfillDetail": "Varje möte får standardtilldelningen för sin kalender. Det gäller även möten där någon tagit bort tilldelningen för hand. Det går bara att ångra ett möte i taget.",
             "backfillConfirm": "Tilldela",
-            "backfillNone": "Det finns inga möten utan tilldelning i kalendrar med standardtilldelning.",
+            "backfillNone": "Det finns inga möten att tillämpa en standardtilldelning på.",
             "backfillDone": "{{count}} möten tilldelade.",
             "backfillDone_one": "{{count}} möte tilldelat.",
-            "backfillChanged": "Mötena har ändrats sedan de räknades. Tillämpa igen."
+            "backfillChanged": "Mötena har ändrats sedan de räknades. Tillämpa igen.",
+            "backfillFillCount": "{{count}} möten utan tilldelning",
+            "backfillFillCount_one": "{{count}} möte utan tilldelning",
+            "backfillMovedTitle": "Möten med en annan kalenders standardtilldelning",
+            "backfillMovedHint": "De här mötena har fortfarande standardtilldelningen för en annan kalender i samma konto. Det kan vara ett möte som flyttats, eller en kalender vars standardtilldelning ändrades senare. Bara de valda mötena ändras, de andra förblir som de är.",
+            "backfillMovedPartial": "Möten {{first}} till {{last}} av {{total}}. ”Tilldela” tillämpar valet på den här sidan, ”Visa nästa” går vidare utan att tillämpa det. Möten som inte är valda lämnas orörda.",
+            "backfillMovedNext": "Visa nästa",
+            "backfillMovedAll": "Markera alla",
+            "backfillMovedChange": "Från {{from}} till {{to}}"
         },
         "calendarDefaultsTitle": "Standardvärden för nya händelser",
         "calendarDefaultsDescription": "Förinställningar som tillämpas automatiskt på nya händelser.",
@@ -2784,6 +2798,9 @@
         "backupRestoreErrorKeyInvalid": "Nyckeln kom inte fram till servern i läsbar form. Ange den igen och återställ en gång till. Inget har ändrats här.",
         "backupRestoreErrorOwnKeyMissing": "Den här installationen har ingen DB_ENCRYPTION_KEY och kan därför inte öppna säkerhetskopian. Ange DB_ENCRYPTION_KEY, starta om Yuvomi och återställ sedan med säkerhetskopians nyckel.",
         "backupRestoreErrorDamaged": "Säkerhetskopian är skadad eller ofullständig; nyckeln stämmer. Hämta filen igen, jämför storlek och sha256sum med originalet och återställ den kopian. Inget har ändrats här.",
+        "backupRestoreErrorCorrupt": "Säkerhetskopian är skadad eller ofullständig. Hämta filen igen, jämför storlek och sha256sum med originalet och återställ den kopian, eller använd en äldre säkerhetskopia. Inget har ändrats här.",
+        "backupRestoreErrorInProgress": "En återställning pågår redan på den här installationen. Vänta tills den är klar och kontrollera sedan vilken säkerhetskopia som gäller innan du återställer igen. Den här begäran ändrade ingenting.",
+        "backupRestoreErrorBusy": "Yuvomi är fortfarande upptaget, till exempel med en synkronisering eller en säkerhetskopia, så återställningen startade inte. Inget har ändrats här. Försök igen om en stund.",
         "backupRestoreErrorUnreadable": "Säkerhetskopian kunde inte läsas. Kontrollera att filen är fullständig och försök igen; den exakta orsaken finns i serverloggen. Inget har ändrats här.",
         "backupRestoreErrorGeneric": "Återställningen misslyckades. Den exakta orsaken finns i serverloggen.",
         "backupRestoreErrorNeverEncrypted": "Har filen aldrig krypterats är den ingen giltig Yuvomi-databas.",
@@ -2816,6 +2833,8 @@
         "orDivider": "eller",
         "ssoError": "SSO-inloggning misslyckades. Försök igen.",
         "ssoNoAccount": "Det finns ännu inget konto här för den här SSO-inloggningen. Kontakta administratören för ditt hushåll.",
+        "ssoEmailAmbiguous": "Din e-postadress hör här till mer än ett konto, därför kan SSO-inloggningen inte kopplas till något av dem. Kontakta administratören för ditt hushåll.",
+        "ssoLinkRequired": "Det finns redan ett konto med lösenord för din e-postadress här. Logga in med det och koppla SSO under Inställningar → Konto, eller kontakta administratören för ditt hushåll.",
         "forgotPassword": "Glömt lösenordet?",
         "networkError": "Anslutningen misslyckades. Kontrollera att servern körs och försök igen.",
         "capsLockWarning": "Caps Lock är på.",
@@ -3578,8 +3597,7 @@
         "currentMonth": "Nuvarande",
         "noVisitReportsInMonth": "Inga personalbesök registrerades under {{month}}.",
         "settledAdminOnly": "Bara en admin kan ändra eller ta bort",
-        "reportVisitsCount": "Besök",
-        "receiptPresent": "Bifogat"
+        "reportVisitsCount": "Besök"
     },
     "userMultiSelect": {
         "moreUsers": "mer",
@@ -3682,7 +3700,8 @@
             "recurring_paused": "Återkommande utgift pausad",
             "recurring_resumed": "Återkommande utgift återupptagen",
             "recurring_generated": "Återkommande utgift skapades",
-            "payment_reversed": "Betalning återförd"
+            "payment_reversed": "Betalning återförd",
+            "ledger_restored": "Bokföring återställd"
         },
         "splitPercentage": "Procent",
         "splitExact": "Exakt belopp",
@@ -5484,7 +5503,7 @@
         "openAction": "Öppna {{name}}",
         "limitReached": "Högst {{count}} dokument.",
         "limitReached_one": "Högst {{count}} dokument.",
-        "presentHidden": "Bifogat"
+        "lockedPrivate": "Bilaga finns (privat)"
     },
     "join": {
         "title": "Skapa ditt konto",

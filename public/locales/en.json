@@ -46,6 +46,7 @@
         "errorForbidden": "Access denied. Please sign in again.",
         "errorNotFound": "The entry was not found.",
         "errorServer": "Server error. Please try again later.",
+        "errorRestoreInProgress": "A backup is being restored right now. Your change was not saved, try again in a minute.",
         "errorTimeout": "The connection took too long. Please try again.",
         "requiredFields": "Please fill in all required fields.",
         "invalidInput": "Invalid input.",
@@ -61,7 +62,8 @@
             "hint": "Controls who can see this entry in Yuvomi.",
             "assigneesNobodyHint": "With no one assigned, only you can see this entry."
         },
-        "toShoppingListNamed": "Add {{title}} to the shopping list"
+        "toShoppingListNamed": "Add {{title}} to the shopping list",
+        "emailInUse": "This email address already belongs to another account."
     },
     "kitchen": {
         "noShoppingLists": "There is no shopping list yet.",
@@ -741,6 +743,8 @@
         "searchCountCapped": "{{shown}} of {{total}} results",
         "title": "Calendar",
         "attachmentRemove": "Remove attachment",
+        "attachmentChangeRefused": "You can't change this attachment: the document is private, or you don't have access to documents.",
+        "attachmentUploadRefused": "Only members who may edit documents can add an attachment.",
         "newEvent": "New Event",
         "editEvent": "Edit Event",
         "addEvent": "Add event",
@@ -1123,6 +1127,7 @@
         "phonePreview": "Preview: {{value}}",
         "phoneImplausible": "This number looks incomplete - it will still be saved.",
         "emailLabel": "Email",
+        "emailLockedHint": "These addresses belong to this member's account. Only the member or an admin can change them.",
         "emailPlaceholder": "name@example.com",
         "addressLabel": "Address",
         "addressPlaceholder": "Street, ZIP City",
@@ -2158,6 +2163,7 @@
         "cardavErrorDuplicate": "An account with this address and username is already connected.",
         "cardavErrorAccountNotFound": "This account no longer exists. Reload the page.",
         "cardavErrorAddressbookNotFound": "This address book no longer exists. Refresh the address books.",
+        "cardavErrorPasswordRequired": "A different server or username needs the password again.",
         "syncPartiallyFailed": "Last run had errors",
         "syncErrorDetail": "Last run: {{error}}",
         "cardavEditAccount": "Edit CardDAV account",
@@ -2578,16 +2584,24 @@
             "defaultAssigneeHint": "Newly synced events are automatically assigned to this person.",
             "defaultAssigneeRoutingHint": "Default assignee: events from a calendar get the person chosen there, and a new event assigned only to that person is created in that calendar. This applies to Google and CalDAV calendars, not to Apple or Outlook.",
             "backfillTitle": "Fill in assignments",
-            "backfillDescription": "A default assignee only applies to appointments imported after it was set. Here you can apply it once to the appointments already imported from all accounts. Appointments already assigned to someone stay as they are.",
+            "backfillDescription": "A default assignee only applies to appointments imported after it was set. Here you can apply it once to the appointments already imported from all accounts. Unassigned appointments get it directly. Appointments that still carry the default assignee of another calendar are listed one by one for you to choose. Any other assignment stays as it is.",
             "backfillAction": "Apply to existing appointments",
             "backfillQuestion": "Assign {{count}} unassigned appointments?",
             "backfillQuestion_one": "Assign {{count}} unassigned appointment?",
             "backfillDetail": "Each appointment gets the default assignee of its calendar. This includes appointments whose assignment someone removed by hand. It can only be undone one appointment at a time.",
             "backfillConfirm": "Assign",
-            "backfillNone": "There are no unassigned appointments in calendars with a default assignee.",
+            "backfillNone": "There are no appointments to apply a default assignee to.",
             "backfillDone": "{{count}} appointments assigned.",
             "backfillDone_one": "{{count}} appointment assigned.",
-            "backfillChanged": "Appointments changed since they were counted. Please apply it again."
+            "backfillChanged": "Appointments changed since they were counted. Please apply it again.",
+            "backfillFillCount": "{{count}} unassigned appointments",
+            "backfillFillCount_one": "{{count}} unassigned appointment",
+            "backfillMovedTitle": "Appointments with another calendar's default assignee",
+            "backfillMovedHint": "These appointments still carry the default assignee of another calendar of the same account. That can be an appointment that was moved, or a calendar whose default assignee was changed later. Only the selected appointments change; the others stay as they are.",
+            "backfillMovedPartial": "Appointments {{first}} to {{last}} of {{total}}. “Assign” applies the selection on this page, “Show next” moves on without applying it. Appointments that are not selected stay as they are.",
+            "backfillMovedNext": "Show next",
+            "backfillMovedAll": "Select all",
+            "backfillMovedChange": "From {{from}} to {{to}}"
         },
         "calendarDefaultsTitle": "Defaults for new events",
         "calendarDefaultsDescription": "Presets automatically applied to new events.",
@@ -2784,6 +2798,9 @@
         "backupRestoreErrorKeyInvalid": "The key did not reach the server in a readable form. Enter it again and restore once more. Nothing was changed here.",
         "backupRestoreErrorOwnKeyMissing": "This installation has no DB_ENCRYPTION_KEY, so it cannot open the backup. Set DB_ENCRYPTION_KEY, restart Yuvomi and then restore with the backup's key.",
         "backupRestoreErrorDamaged": "The backup is damaged or incomplete; the key is right. Get the file again, compare its size and sha256sum with the original and restore that copy. Nothing was changed here.",
+        "backupRestoreErrorCorrupt": "The backup is damaged or incomplete. Get the file again, compare its size and sha256sum with the original and restore that copy, or use an older backup. Nothing was changed here.",
+        "backupRestoreErrorInProgress": "A restore is already running on this installation. Wait until it has finished, then check which backup is in place before you restore again. This request changed nothing.",
+        "backupRestoreErrorBusy": "Yuvomi is still busy, for example with a sync or a backup, so the restore did not start. Nothing was changed here. Try again in a moment.",
         "backupRestoreErrorUnreadable": "The backup could not be read. Check that the file is complete and try again; the exact cause is in the server log. Nothing was changed here.",
         "backupRestoreErrorGeneric": "The restore failed. The exact cause is in the server log.",
         "backupRestoreErrorNeverEncrypted": "If the file was never encrypted, it is not a valid Yuvomi database.",
@@ -2816,6 +2833,8 @@
         "orDivider": "or",
         "ssoError": "SSO sign-in failed. Please try again.",
         "ssoNoAccount": "There is no account here yet for this SSO sign-in. Please contact your household's administrator.",
+        "ssoEmailAmbiguous": "Your email address belongs to more than one account here, so the SSO sign-in cannot be matched to any of them. Please contact your household's administrator.",
+        "ssoLinkRequired": "There is already an account with a password for your email address here. Sign in with it and link SSO under Settings → Account, or contact your household's administrator.",
         "forgotPassword": "Forgot password?",
         "networkError": "Connection failed. Check that the server is running and try again.",
         "capsLockWarning": "Caps Lock is on.",
@@ -3578,8 +3597,7 @@
         "currentMonth": "Current",
         "noVisitReportsInMonth": "No staff visits recorded in {{month}}.",
         "settledAdminOnly": "Only an admin can change or delete it",
-        "reportVisitsCount": "Visits",
-        "receiptPresent": "Attached"
+        "reportVisitsCount": "Visits"
     },
     "userMultiSelect": {
         "moreUsers": "more",
@@ -3682,7 +3700,8 @@
             "recurring_paused": "Recurring expense paused",
             "recurring_resumed": "Recurring expense resumed",
             "recurring_generated": "Recurring expense generated",
-            "payment_reversed": "Payment reversed"
+            "payment_reversed": "Payment reversed",
+            "ledger_restored": "Booking restored"
         },
         "splitPercentage": "Percentage",
         "splitExact": "Exact amount",
@@ -5484,7 +5503,7 @@
         "openAction": "Open {{name}}",
         "limitReached": "At most {{count}} documents.",
         "limitReached_one": "At most {{count}} document.",
-        "presentHidden": "Attached"
+        "lockedPrivate": "Attachment present (private)"
     },
     "join": {
         "title": "Set up your account",

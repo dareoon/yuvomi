@@ -46,6 +46,7 @@
         "errorForbidden": "アクセスが拒否されました。再度サインインしてください。",
         "errorNotFound": "エントリが見つかりませんでした。",
         "errorServer": "サーバーエラーが発生しました。後でもう一度お試しください。",
+        "errorRestoreInProgress": "現在バックアップを復元しています。変更は保存されませんでした。1分後にもう一度お試しください。",
         "errorTimeout": "接続に時間がかかりすぎました。もう一度お試しください。",
         "requiredFields": "必須項目をすべて入力してください。",
         "invalidInput": "無効な入力です。",
@@ -61,7 +62,8 @@
             "hint": "この項目を Yuvomi 内で見られる人を設定します。",
             "assigneesNobodyHint": "誰も割り当てないと、この項目はあなたにしか表示されません。"
         },
-        "toShoppingListNamed": "{{title}}を買い物リストへ追加"
+        "toShoppingListNamed": "{{title}}を買い物リストへ追加",
+        "emailInUse": "このメールアドレスはすでに別のアカウントで使われています。"
     },
     "kitchen": {
         "noShoppingLists": "買い物リストがまだありません。",
@@ -741,6 +743,8 @@
         "searchCountCapped": "{{total}} 件中 {{shown}} 件",
         "title": "カレンダー",
         "attachmentRemove": "添付ファイルを削除",
+        "attachmentChangeRefused": "この添付ファイルは変更できません。書類が非公開か、書類へのアクセス権がありません。",
+        "attachmentUploadRefused": "添付ファイルを追加できるのは、書類を編集できるメンバーだけです。",
         "newEvent": "新しい予定",
         "editEvent": "予定を編集",
         "addEvent": "予定を追加",
@@ -1123,6 +1127,7 @@
         "phonePreview": "プレビュー: {{value}}",
         "phoneImplausible": "この番号は不完全のようです - それでも保存されます。",
         "emailLabel": "メール",
+        "emailLockedHint": "これらのアドレスはこのメンバーのアカウントに属しています。変更できるのは本人または管理者のみです。",
         "emailPlaceholder": "name@example.com",
         "addressLabel": "住所",
         "addressPlaceholder": "町名、都市",
@@ -1939,6 +1944,7 @@
         "cardavErrorDuplicate": "このアドレスとユーザー名のアカウントはすでに接続されています。",
         "cardavErrorAccountNotFound": "このアカウントは存在しません。ページを再読み込みしてください。",
         "cardavErrorAddressbookNotFound": "このアドレス帳は存在しません。アドレス帳を更新してください。",
+        "cardavErrorPasswordRequired": "別のサーバーまたはユーザー名にはパスワードを再入力してください。",
         "syncPartiallyFailed": "前回の実行でエラーがありました",
         "syncErrorDetail": "前回の実行: {{error}}",
         "cardavEditAccount": "CardDAV アカウントを編集",
@@ -2555,16 +2561,24 @@
             "defaultAssigneeHint": "新しく同期された予定は自動的にこの人に割り当てられます。",
             "defaultAssigneeRoutingHint": "既定の割り当て先: カレンダーの予定にはそこで選んだ人が割り当てられ、その人だけに割り当てた新しい予定はそのカレンダーに作成されます。Google と CalDAV のカレンダーが対象で、Apple と Outlook は対象外です。",
             "backfillTitle": "割り当てを補完",
-            "backfillDescription": "既定の割り当て先は、設定後に取り込まれた予定にだけ適用されます。ここでは、すべてのアカウントからすでに取り込まれた予定に一度だけ適用できます。すでに誰かに割り当てられている予定は変更されません。",
+            "backfillDescription": "既定の割り当て先は、設定後に取り込まれた予定にだけ適用されます。ここでは、すべてのアカウントからすでに取り込まれた予定に一度だけ適用できます。割り当てのない予定にはそのまま設定されます。別のカレンダーの既定の割り当て先が残っている予定は、1件ずつ表示されるので選んでください。それ以外の割り当ては変更されません。",
             "backfillAction": "既存の予定に適用",
             "backfillQuestion": "割り当てのない予定 {{count}} 件を割り当てますか？",
             "backfillQuestion_one": "割り当てのない予定 {{count}} 件を割り当てますか？",
             "backfillDetail": "各予定には、そのカレンダーの既定の割り当て先が設定されます。誰かが手動で割り当てを外した予定も対象になります。元に戻すには予定ごとに操作する必要があります。",
             "backfillConfirm": "割り当てる",
-            "backfillNone": "既定の割り当て先があるカレンダーに、割り当てのない予定はありません。",
+            "backfillNone": "既定の割り当て先を適用する予定はありません。",
             "backfillDone": "予定 {{count}} 件を割り当てました。",
             "backfillDone_one": "予定 {{count}} 件を割り当てました。",
-            "backfillChanged": "件数を数えた後に予定が変わりました。もう一度適用してください。"
+            "backfillChanged": "件数を数えた後に予定が変わりました。もう一度適用してください。",
+            "backfillFillCount": "割り当てのない予定 {{count}} 件",
+            "backfillFillCount_one": "割り当てのない予定 {{count}} 件",
+            "backfillMovedTitle": "別のカレンダーの既定の割り当て先が残っている予定",
+            "backfillMovedHint": "これらの予定には、同じアカウントの別のカレンダーの既定の割り当て先がまだ残っています。移動された予定の場合もあれば、既定の割り当て先が後から変更されたカレンダーの場合もあります。変更されるのは選択した予定だけで、ほかはそのままです。",
+            "backfillMovedPartial": "{{total}} 件中 {{first}} 件目から {{last}} 件目。「割り当てる」はこのページの選択を適用し、「次を表示」は適用せずに先へ進みます。選択していない予定は変更されません。",
+            "backfillMovedNext": "次を表示",
+            "backfillMovedAll": "すべて選択",
+            "backfillMovedChange": "{{from}} から {{to}} へ"
         },
         "calendarDefaultsTitle": "新しい予定の既定値",
         "calendarDefaultsDescription": "新しい予定に自動的に適用される既定設定。",
@@ -2784,6 +2798,9 @@
         "backupRestoreErrorKeyInvalid": "キーが読み取れる形でサーバーに届きませんでした。もう一度入力して復元し直してください。ここでは何も変更されていません。",
         "backupRestoreErrorOwnKeyMissing": "このインストールには DB_ENCRYPTION_KEY がないため、バックアップを開けません。DB_ENCRYPTION_KEY を設定して Yuvomi を再起動し、バックアップのキーで復元してください。",
         "backupRestoreErrorDamaged": "バックアップが破損しているか不完全です。キーは正しいです。ファイルを取得し直し、サイズと sha256sum を元のファイルと比べてから、そのコピーを復元してください。ここでは何も変更されていません。",
+        "backupRestoreErrorCorrupt": "バックアップが破損しているか不完全です。ファイルを取得し直し、サイズと sha256sum を元のファイルと比べてからそのコピーを復元するか、古いバックアップを使ってください。ここでは何も変更されていません。",
+        "backupRestoreErrorInProgress": "このインストールではすでに復元が実行中です。完了するまで待ち、再度復元する前にどのバックアップが適用されているか確認してください。このリクエストでは何も変更されていません。",
+        "backupRestoreErrorBusy": "Yuvomi は同期やバックアップなどでまだ処理中のため、復元は開始されませんでした。ここでは何も変更されていません。少ししてからもう一度お試しください。",
         "backupRestoreErrorUnreadable": "バックアップを読み取れませんでした。ファイルが完全か確認してもう一度お試しください。正確な原因はサーバーログにあります。ここでは何も変更されていません。",
         "backupRestoreErrorGeneric": "復元に失敗しました。正確な原因はサーバーログにあります。",
         "backupRestoreErrorNeverEncrypted": "ファイルが一度も暗号化されていない場合、有効な Yuvomi のデータベースではありません。",
@@ -2816,6 +2833,8 @@
         "orDivider": "または",
         "ssoError": "SSOサインインに失敗しました。もう一度お試しください。",
         "ssoNoAccount": "このSSOサインインに対応するアカウントはまだ存在しません。世帯の管理者にお問い合わせください。",
+        "ssoEmailAmbiguous": "このメールアドレスは複数のアカウントに登録されているため、SSOサインインをどのアカウントにも関連付けできません。世帯の管理者にお問い合わせください。",
+        "ssoLinkRequired": "このメールアドレスには、パスワード付きのアカウントがすでに存在します。そのアカウントでサインインして 設定 → アカウント でSSOを連携するか、世帯の管理者にお問い合わせください。",
         "forgotPassword": "パスワードをお忘れですか？",
         "networkError": "接続に失敗しました。サーバーが起動しているか確認して、もう一度お試しください。",
         "capsLockWarning": "Caps Lock がオンになっています。",
@@ -3578,8 +3597,7 @@
         "currentMonth": "今月",
         "noVisitReportsInMonth": "{{month}}の訪問記録はありません。",
         "settledAdminOnly": "変更・削除できるのは管理者だけです",
-        "reportVisitsCount": "訪問",
-        "receiptPresent": "添付あり"
+        "reportVisitsCount": "訪問"
     },
     "userMultiSelect": {
         "moreUsers": "他",
@@ -3682,7 +3700,8 @@
             "recurring_paused": "定期費用を一時停止",
             "recurring_resumed": "定期費用を再開",
             "recurring_generated": "定期費用を生成",
-            "payment_reversed": "支払いを取り消し"
+            "payment_reversed": "支払いを取り消し",
+            "ledger_restored": "記帳を復元"
         },
         "splitPercentage": "割合",
         "splitExact": "正確な金額",
@@ -5484,7 +5503,7 @@
         "openAction": "{{name}} を開く",
         "limitReached": "書類は最大 {{count}} 件までです。",
         "limitReached_one": "書類は最大 {{count}} 件までです。",
-        "presentHidden": "添付あり"
+        "lockedPrivate": "添付ファイルあり（非公開）"
     },
     "join": {
         "title": "アカウントの設定",

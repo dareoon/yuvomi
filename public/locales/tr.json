@@ -46,6 +46,7 @@
         "errorForbidden": "Erişim reddedildi. Lütfen tekrar giriş yapın.",
         "errorNotFound": "Kayıt bulunamadı.",
         "errorServer": "Sunucu hatası. Lütfen daha sonra tekrar deneyin.",
+        "errorRestoreInProgress": "Şu anda bir yedek geri yükleniyor. Değişikliğiniz kaydedilmedi, bir dakika sonra yeniden deneyin.",
         "errorTimeout": "Bağlantı çok uzun sürdü. Lütfen tekrar deneyin.",
         "requiredFields": "Lütfen tüm zorunlu alanları doldurun.",
         "invalidInput": "Geçersiz giriş.",
@@ -61,7 +62,8 @@
             "hint": "Bu kaydı Yuvomi’de kimin görebileceğini belirler.",
             "assigneesNobodyHint": "Kimse atanmazsa bu kaydı yalnızca sen görürsün."
         },
-        "toShoppingListNamed": "{{title}} yemeğini alışveriş listesine ekle"
+        "toShoppingListNamed": "{{title}} yemeğini alışveriş listesine ekle",
+        "emailInUse": "Bu e-posta adresi zaten başka bir hesaba ait."
     },
     "kitchen": {
         "noShoppingLists": "Henüz alışveriş listesi yok.",
@@ -741,6 +743,8 @@
         "searchCountCapped": "{{total}} sonuçtan {{shown}} tanesi",
         "title": "Takvim",
         "attachmentRemove": "Eki kaldır",
+        "attachmentChangeRefused": "Bu eki değiştiremezsin: belge özel veya belgelere erişimin yok.",
+        "attachmentUploadRefused": "Yalnızca belgeleri düzenleyebilenler ek ekleyebilir.",
         "newEvent": "Yeni Etkinlik",
         "editEvent": "Etkinliği Düzenle",
         "addEvent": "Etkinlik ekle",
@@ -1123,6 +1127,7 @@
         "phonePreview": "Önizleme: {{value}}",
         "phoneImplausible": "Bu numara eksik görünüyor - yine de kaydedilecek.",
         "emailLabel": "E-posta",
+        "emailLockedHint": "Bu adresler bu üyenin hesabına aittir. Yalnızca üyenin kendisi veya bir yönetici değiştirebilir.",
         "emailPlaceholder": "ad@ornek.com.tr",
         "addressLabel": "Adres",
         "addressPlaceholder": "Sokak, Posta Kodu Şehir",
@@ -1939,6 +1944,7 @@
         "cardavErrorDuplicate": "Bu adres ve kullanıcı adına sahip bir hesap zaten bağlı.",
         "cardavErrorAccountNotFound": "Bu hesap artık yok. Sayfayı yeniden yükle.",
         "cardavErrorAddressbookNotFound": "Bu adres defteri artık yok. Adres defterlerini yenile.",
+        "cardavErrorPasswordRequired": "Farklı bir sunucu veya kullanıcı adı için parolayı yeniden gir.",
         "syncPartiallyFailed": "Son çalıştırmada hata oluştu",
         "syncErrorDetail": "Son çalıştırma: {{error}}",
         "cardavEditAccount": "CardDAV hesabını düzenle",
@@ -2555,16 +2561,24 @@
             "defaultAssigneeHint": "Yeni eşitlenen etkinlikler otomatik olarak bu kişiye atanır.",
             "defaultAssigneeRoutingHint": "Varsayılan atama: bir takvimdeki etkinlikler orada seçilen kişiye atanır ve yalnızca o kişiye atanan yeni bir etkinlik o takvimde oluşturulur. Google ve CalDAV takvimleri için geçerlidir, Apple veya Outlook için değil.",
             "backfillTitle": "Atamaları tamamla",
-            "backfillDescription": "Varsayılan atama yalnızca ayarlandıktan sonra içe aktarılan randevulara uygulanır. Burada bunu tüm hesaplardan zaten içe aktarılmış randevulara bir kez uygulayabilirsiniz. Zaten birine atanmış randevular değişmez.",
+            "backfillDescription": "Varsayılan atama yalnızca ayarlandıktan sonra içe aktarılan randevulara uygulanır. Burada bunu tüm hesaplardan zaten içe aktarılmış randevulara bir kez uygulayabilirsiniz. Atanmamış randevular onu doğrudan alır. Hâlâ başka bir takvimin varsayılan atamasını taşıyan randevular seçmeniz için tek tek listelenir. Diğer tüm atamalar değişmez.",
             "backfillAction": "Mevcut randevulara uygula",
             "backfillQuestion": "Atanmamış {{count}} randevu atansın mı?",
             "backfillQuestion_one": "Atanmamış {{count}} randevu atansın mı?",
             "backfillDetail": "Her randevu kendi takviminin varsayılan atamasını alır. Atamasını birinin elle kaldırdığı randevular da buna dahildir. Yalnızca randevu randevu geri alınabilir.",
             "backfillConfirm": "Ata",
-            "backfillNone": "Varsayılan ataması olan takvimlerde atanmamış randevu yok.",
+            "backfillNone": "Varsayılan atama uygulanacak randevu yok.",
             "backfillDone": "{{count}} randevu atandı.",
             "backfillDone_one": "{{count}} randevu atandı.",
-            "backfillChanged": "Randevular sayıldıktan sonra değişti. Lütfen yeniden uygulayın."
+            "backfillChanged": "Randevular sayıldıktan sonra değişti. Lütfen yeniden uygulayın.",
+            "backfillFillCount": "Atanmamış {{count}} randevu",
+            "backfillFillCount_one": "Atanmamış {{count}} randevu",
+            "backfillMovedTitle": "Başka bir takvimin varsayılan atamasını taşıyan randevular",
+            "backfillMovedHint": "Bu randevular hâlâ aynı hesaptaki başka bir takvimin varsayılan atamasını taşıyor. Bu, taşınmış bir randevu ya da varsayılan ataması sonradan değiştirilmiş bir takvim olabilir. Yalnızca seçilen randevular değişir, diğerleri olduğu gibi kalır.",
+            "backfillMovedPartial": "{{total}} randevudan {{first}} ile {{last}} arası. “Ata” bu sayfadaki seçimi uygular, “Sonrakileri göster” uygulamadan ilerler. Seçilmeyen randevular değişmez.",
+            "backfillMovedNext": "Sonrakileri göster",
+            "backfillMovedAll": "Tümünü seç",
+            "backfillMovedChange": "{{from}} yerine {{to}}"
         },
         "calendarDefaultsTitle": "Yeni etkinlikler için varsayılanlar",
         "calendarDefaultsDescription": "Yeni etkinliklere otomatik uygulanan ön ayarlar.",
@@ -2784,6 +2798,9 @@
         "backupRestoreErrorKeyInvalid": "Anahtar sunucuya okunabilir biçimde ulaşmadı. Yeniden girin ve bir kez daha geri yükleyin. Burada hiçbir şey değiştirilmedi.",
         "backupRestoreErrorOwnKeyMissing": "Bu kurulumun DB_ENCRYPTION_KEY değeri yok, bu yüzden yedeği açamıyor. DB_ENCRYPTION_KEY ayarlayın, Yuvomi'yi yeniden başlatın ve ardından yedeğin anahtarıyla geri yükleyin.",
         "backupRestoreErrorDamaged": "Yedek hasarlı veya eksik; anahtar doğru. Dosyayı yeniden alın, boyutunu ve sha256sum değerini asılla karşılaştırın ve o kopyayı geri yükleyin. Burada hiçbir şey değiştirilmedi.",
+        "backupRestoreErrorCorrupt": "Yedek hasarlı veya eksik. Dosyayı yeniden alın, boyutunu ve sha256sum değerini asılla karşılaştırın ve o kopyayı geri yükleyin ya da daha eski bir yedek kullanın. Burada hiçbir şey değiştirilmedi.",
+        "backupRestoreErrorInProgress": "Bu kurulumda zaten bir geri yükleme çalışıyor. Bitmesini bekleyin, ardından yeniden geri yüklemeden önce hangi yedeğin yüklü olduğunu kontrol edin. Bu istek hiçbir şeyi değiştirmedi.",
+        "backupRestoreErrorBusy": "Yuvomi hâlâ meşgul, örneğin bir eşitleme veya yedekleme ile, bu yüzden geri yükleme başlamadı. Burada hiçbir şey değiştirilmedi. Birazdan yeniden deneyin.",
         "backupRestoreErrorUnreadable": "Yedek okunamadı. Dosyanın eksiksiz olduğunu kontrol edip yeniden deneyin; kesin neden sunucu günlüğünde. Burada hiçbir şey değiştirilmedi.",
         "backupRestoreErrorGeneric": "Geri yükleme başarısız oldu. Kesin neden sunucu günlüğünde.",
         "backupRestoreErrorNeverEncrypted": "Dosya hiç şifrelenmediyse geçerli bir Yuvomi veritabanı değildir.",
@@ -2816,6 +2833,8 @@
         "orDivider": "veya",
         "ssoError": "SSO girişi başarısız oldu. Lütfen tekrar deneyin.",
         "ssoNoAccount": "Bu SSO girişi için burada henüz bir hesap yok. Lütfen hane yöneticinizle iletişime geçin.",
+        "ssoEmailAmbiguous": "E-posta adresiniz burada birden fazla hesaba ait olduğundan SSO girişi hiçbiriyle eşleştirilemiyor. Lütfen hane yöneticinizle iletişime geçin.",
+        "ssoLinkRequired": "E-posta adresiniz için burada zaten parolalı bir hesap var. Bu hesapla giriş yapın ve SSO'yu Ayarlar → Hesap altında bağlayın ya da hane yöneticinizle iletişime geçin.",
         "forgotPassword": "Parolanı mı unuttun?",
         "networkError": "Bağlantı başarısız oldu. Sunucunun çalıştığını kontrol edip tekrar deneyin.",
         "capsLockWarning": "Caps Lock açık.",
@@ -3578,8 +3597,7 @@
         "currentMonth": "Bu Ay",
         "noVisitReportsInMonth": "{{month}} döneminde ziyaret kaydedilmedi.",
         "settledAdminOnly": "Yalnızca bir yönetici değiştirebilir veya silebilir",
-        "reportVisitsCount": "Ziyaretler",
-        "receiptPresent": "Ekli"
+        "reportVisitsCount": "Ziyaretler"
     },
     "userMultiSelect": {
         "moreUsers": "daha",
@@ -3682,7 +3700,8 @@
             "recurring_paused": "Tekrarlanan gider duraklatıldı",
             "recurring_resumed": "Tekrarlanan gider sürdürüldü",
             "recurring_generated": "Tekrarlanan gider üretildi",
-            "payment_reversed": "Ödeme iptal edildi"
+            "payment_reversed": "Ödeme iptal edildi",
+            "ledger_restored": "Kayıt geri yüklendi"
         },
         "splitPercentage": "Yüzde",
         "splitExact": "Kesin tutar",
@@ -5484,7 +5503,7 @@
         "openAction": "{{name}} ögesini aç",
         "limitReached": "En fazla {{count}} belge.",
         "limitReached_one": "En fazla {{count}} belge.",
-        "presentHidden": "Ekli"
+        "lockedPrivate": "Ek mevcut (özel)"
     },
     "join": {
         "title": "Hesabını oluştur",
