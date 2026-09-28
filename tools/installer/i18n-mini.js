@@ -23,13 +23,20 @@ function storedLocale() {
   } catch { return null; }
 }
 
-/** Gemerkte Wahl > Browsersprache > Englisch, analog public/i18n.js:31-34. */
+/**
+ * Gemerkte Wahl > Browsersprache > Englisch, wie resolveLocale() in
+ * public/i18n.js. Je Tag erst Sprache mit Region (pt-BR), dann die
+ * Basissprache - bis #1437 zaehlte nur der Teil vor dem ersten Bindestrich,
+ * und ein brasilianischer Browser bekam `pt`.
+ */
 export function resolveLocale(languages = navigator.languages || [navigator.language]) {
   const stored = storedLocale();
   if (stored) return stored;
   for (const tag of languages) {
-    const base = (tag || '').split('-')[0].toLowerCase();
-    if (SUPPORTED_LOCALES.includes(base)) return base;
+    const [lang = '', region = ''] = (tag || '').split('-');
+    const full = `${lang.toLowerCase()}-${region.toUpperCase()}`;
+    if (region && SUPPORTED_LOCALES.includes(full)) return full;
+    if (SUPPORTED_LOCALES.includes(lang.toLowerCase())) return lang.toLowerCase();
   }
   return FALLBACK_LOCALE;
 }
