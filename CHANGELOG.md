@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Brazilian Portuguese as its own language** (#1437, translated by @dareoon). The app, the
+  web installer and the command-line installer speak pt-BR as the 25th language, next to the
+  existing Portuguese. A Brazilian browser or `LANG=pt_BR.UTF-8` picks it on its own, as does a
+  household whose region is Brazil for the entries Yuvomi writes itself; every other Portuguese
+  region keeps `pt`. Holiday names in Brazil stay Portuguese under the new data language.
+
 - **The search opens places and actions, not only entries.** Typing "Schedule" or "new" now
   offers a "Go to" section with every module in your navigation and every settings sheet, and a
   "Create new" section that opens the page and starts its add action, both above the entries found.
