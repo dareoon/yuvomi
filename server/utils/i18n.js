@@ -55,9 +55,9 @@ const LOCALE_FILE_RE = /^([a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-[A-Z]{2})?)\.json$/;
 
 /**
  * Der Locale-Code eines Dateinamens, oder null. Exportiert, weil der Bestand
- * die Erweiterung nicht misst: alle 24 Dateien heissen `xx.json` oder
- * `xxx.json`, ein Test ueber getSupportedLocales() liefe an jeder Subtag-Form
- * vorbei. getSupportedLocales() ruft genau diese Funktion, es gibt also keinen
+ * die Erweiterung kaum misst: bis auf `pt-BR.json` (#1437) heissen alle
+ * Dateien `xx.json` oder `xxx.json`, ein Test ueber getSupportedLocales() liefe
+ * an jeder Schrift-Form vorbei. getSupportedLocales() ruft genau diese Funktion, es gibt also keinen
  * zweiten Pfad, der auseinanderlaufen koennte.
  */
 export function localeFromFileName(file) {
