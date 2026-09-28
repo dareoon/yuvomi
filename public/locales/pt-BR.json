@@ -3439,7 +3439,7 @@
         "expiryValidUntil": "Válido até {{date}}",
         "expiryEndsOn": "Vence em {{date}}",
         "expiryEndedOn": "Venceu em {{date}}",
-        "categoryHint": "O tipo de documento, por exemplo Finanças, Seguro ou Escola.",
+        "categoryHint": "O tipo de documento, por exemplo Finanças, Seguros ou Educação.",
         "folderHint": "Onde ele está guardado, em pastas que você mesmo cria.",
         "categoryFilterLabel": "Categoria (tipo de documento)",
         "folderFilterLabel": "Pasta (onde está guardado)",
