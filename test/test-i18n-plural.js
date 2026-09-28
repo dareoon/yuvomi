@@ -53,6 +53,15 @@ test('Deutsch: Singular und Plural je nach count', async () => {
   assert.equal(t('settings.enabledReminderListCount', { count: 0 }), '0 Erinnerungslisten aktiviert');
 });
 
+test('Abos: „1 Tag überfällig", nicht „1 Tage" (Critique 2026-09-25)', async () => {
+  await setLocale('de');
+  assert.equal(t('subscriptions.overdueDays', { count: 1 }), '1 Tag überfällig');
+  assert.equal(t('subscriptions.overdueDays', { count: 3 }), '3 Tage überfällig');
+  assert.equal(t('subscriptions.reminderMeta', { count: 1 }), '1 Tag vorher');
+  await setLocale('en');
+  assert.equal(t('subscriptions.overdueDays', { count: 1 }), '1 day overdue');
+});
+
 test('Englisch: Singular und Plural je nach count', async () => {
   await setLocale('en');
   assert.equal(t('settings.enabledReminderListCount', { count: 1 }), '1 reminder list enabled');
@@ -265,7 +274,6 @@ const PLURAL_EXCEPTIONS = {
   'dashboard.healthRefill': 'NO_NOUN',
   'health.labs.abnormalBadge': 'NO_NOUN',
   'subscriptions.activeCount': 'NO_NOUN',
-  'budget.loansSummary': 'NO_NOUN',
 
   // --- Zahl in Klammern / hinter Doppelpunkt ------------------------------
   'category.errorInUse': 'PARENTHETICAL',
@@ -329,15 +337,13 @@ const PLURAL_EXCEPTIONS = {
   'documents.bulkUploadedToast': 'TODO_ONE',
   'documents.selectedFilesLabel': 'TODO_ONE',
   'budget.chartSummary': 'TODO_ONE',
+  'budget.showAllCategories': 'TODO_ONE',        // Knopf erst ab 4 Kategorien (CHART_LEAD), Zahl in Klammern
   'budget.statsDonutSummary': 'TODO_ONE',
   'health.labs.analyteCount': 'TODO_ONE',
   'health.cycle.status.inDays': 'TODO_ONE',
   'health.cycle.status.overdue': 'TODO_ONE',
   'inventory.navLabelAttention': 'TODO_ONE',        // router-Badge, Guard ist `> 0`
   'tasks.navLabelOverdue': 'TODO_ONE',              // router.js:1151, Guard ist `> 0`
-  'subscriptions.listCount': 'TODO_ONE',
-  'subscriptions.overdueDays': 'TODO_ONE',
-  'subscriptions.reminderMeta': 'TODO_ONE',
   'subscriptions.metaInUseWarning': 'TODO_ONE',     // umgeht den Plural im String: „Abonnement(s)"
   'settings.recipeProviderDeleteAccountConfirm': 'TODO_ONE',
 
@@ -469,4 +475,220 @@ test('tschechische Fastenanzeige dekliniert zusaetzliche Tage', async () => {
   assert.equal(t('health.fasting.extraDays', { count: 1 }), '+1 den');
   assert.equal(t('health.fasting.extraDays', { count: 2 }), '+2 dny');
   assert.equal(t('health.fasting.extraDays', { count: 5 }), '+5 dní');
+});
+
+// ---------------------------------------------------------------------------
+// Die few-Form in den Sprachen, die sie haben (Codex-Review #1472)
+//
+// cs, pl, ru, uk und ar waehlen fuer ganze Zahlen die CLDR-Kategorie `few`
+// (cs: 2-4, pl/ru/uk: 2-4, 22-24 ...). Fehlt `key_few`, faellt resolvePluralKey
+// auf den Basisschluessel zurueck, und der traegt dort die Form fuer 5+ -
+// "STK za 2 dni" statt "STK za 2 dny". Gemessen wird jeder zaehlende Schluessel,
+// der in de.json eine `_one`-Variante hat: er braucht in jeder Sprache mit
+// `few` auch `_few` (Muster: `dashboard.shoppingOpen_few`, in allen Locales).
+//
+// Der Bestand traegt die Luecke 110-mal. Wie beim Guard darueber friert eine
+// Karte ihn ein, statt den Guard abzuschwaechen: jeder NEUE Schluessel ohne
+// `_few` ist rot, und ein Karteneintrag, der inzwischen erfuellt ist, auch -
+// die Karte darf nur schrumpfen.
+// ---------------------------------------------------------------------------
+const FEW_GAPS_LEGACY = new Set([
+  "budget.pendingSummary",
+  "budget.receiptsAttachedLabel",
+  "calendar.filtersActive",
+  "calendar.monthDayEntries",
+  "calendar.monthDayMoreTitles",
+  "calendar.overrideOrphanConfirmTitle",
+  "changelog.whatsNewMore",
+  "contacts.bulkDeleteConfirm",
+  "dashboard.badgeCount",
+  "dashboard.birthdaysMore",
+  "dashboard.countdownMonths",
+  "dashboard.countdownMore",
+  "dashboard.countdownOverdue",
+  "dashboard.countdownWeeks",
+  "dashboard.countdownYears",
+  "dashboard.daysLeft",
+  "dashboard.eventsEndedMore",
+  "dashboard.housekeepingVisitsMonth",
+  "dashboard.memberOpenTasks",
+  "dashboard.metricDoses",
+  "dashboard.metricItems",
+  "dashboard.metricMeals",
+  "dashboard.metricOnLists",
+  "dashboard.metricOpen",
+  "dashboard.metricOverdue",
+  "dashboard.metricPinned",
+  "dashboard.metricPoints",
+  "dashboard.metricVisitsMonth",
+  "dashboard.notesMore",
+  "dashboard.nutritionEntries",
+  "dashboard.pantryExpiringEmpty",
+  "dashboard.pantryExpiringMore",
+  "dashboard.rewardsOwnPending",
+  "dashboard.shoppingMoreLists",
+  "dashboard.tasksMore",
+  "dashboard.todayDosesOpen",
+  "dashboard.todayMore",
+  "dashboard.wallTimerMinutes",
+  "dashboard.wallWhoCount",
+  "dashboard.wasteMore",
+  "dashboard.weekDayEvents",
+  "documentAttach.limitReached",
+  "documents.deleteFolderKeepDocuments",
+  "documents.deleteFolderWithDocuments",
+  "documents.folderDeletedWithDocumentsToast",
+  "documents.folderUpload.selectedFolder",
+  "documents.folderUpload.uploadAction",
+  "documents.folderUpload.uploadedToast",
+  "health.cycle.bubble.periodOverdue",
+  "health.cycle.stats.source.history",
+  "health.cycle.stats.source.historyOther",
+  "health.cycle.stats.source.insufficientHistory",
+  "health.prevention.dueInDays",
+  "health.prevention.overdueDays",
+  "inventory.trackedDateInDays",
+  "inventory.trackedDateOverdueDays",
+  "inventory.warrantyMonthsValue",
+  "inventory.warrantyStatusExpiringSoon",
+  "nav.moreBadge",
+  "pantry.bulkPillLabel",
+  "rrule.summaryCount",
+  "schedule.cycleDaysHint",
+  "schedule.deleteCustomFieldDetail",
+  "schedule.deletePatternDetail",
+  "schedule.quickStartCreated",
+  "settings.apiTokenScopeSummary",
+  "settings.backupSchedulerCronHourly",
+  "settings.backupSchedulerKeepCount",
+  "settings.calendarImport.success",
+  "settings.calendarImport.successWithSkipped",
+  "settings.enabledReminderListCount",
+  "settings.healthPreventionIntervalMonths",
+  "settings.healthPreventionIntervalYears",
+  "settings.healthVisibilityApplied",
+  "settings.kitchenActiveCount",
+  "settings.rewardsDefaultPointsRebaseTitle",
+  "settings.rewardsDefaultPointsRebased",
+  "settings.searchResults",
+  "settings.sync.backfillDone",
+  "settings.sync.backfillFillCount",
+  "settings.sync.backfillQuestion",
+  "settings.syncCleanup.accountQuestion",
+  "settings.syncCleanup.orphanHint",
+  "settings.syncCleanup.orphanQuestion",
+  "settings.syncCleanup.question",
+  "settings.syncCleanup.removed",
+  "settings.twoFactorRecoveryLeft",
+  "shopping.sendListDescription",
+  "splitExpenses.moreMembers",
+  "splitExpenses.receiptsAttachedLabel",
+  "subscriptions.endsAfter",
+  "subscriptions.filtersActive",
+  "subscriptions.overdueDays",
+  "subscriptions.reminderMeta",
+  "tasks.bulkTagHint",
+  "tasks.documentsCount",
+  "tasks.pointsDefaultHint",
+  "tasks.pointsSummary",
+  "tasks.tagDeleteConfirm",
+  "tasks.tagDeleted",
+  "tasks.tagUsageCount",
+  "tasks.tagsSkippedLocked",
+  "tasks.tagsUpdated",
+  "waste.importDiagnosticCancelledExcluded",
+  "waste.importDiagnosticDuplicateInstance",
+  "waste.importDiagnosticMissingUidFallback",
+  "waste.importDiagnosticSkippedUnparsable",
+  "waste.mappingProfileApplicableCount",
+  "waste.upcomingShowMore",
+]);
+
+test("zaehlende Schluessel tragen _few in jeder Sprache mit der CLDR-Kategorie few", () => {
+  const files = readdirSync(LOCALE_DIR).filter((f) => f.endsWith(".json"));
+  const load = (f) => flattenLocale(JSON.parse(readFileSync(new URL(f, LOCALE_DIR), "utf8")));
+  const de = load("de.json");
+  const counting = [...de.keys()]
+    .filter((k) => k.endsWith("_one"))
+    .map((k) => k.slice(0, -4))
+    .filter((b) => typeof de.get(b) === "string" && de.get(b).includes("{{count}}"));
+  const fewLocales = files.filter((f) => new Intl.PluralRules(f.replace(/\.json$/, "")).resolvedOptions().pluralCategories.includes("few"));
+  assert.ok(fewLocales.length >= 5, "cs, pl, ru, uk und ar muessen als few-Sprachen erkannt werden");
+  const missing = new Set();
+  for (const file of fewLocales) {
+    const entries = load(file);
+    for (const base of counting) if (!entries.has(base + "_few")) missing.add(base);
+  }
+  const fresh = [...missing].filter((k) => !FEW_GAPS_LEGACY.has(k));
+  assert.deepEqual(fresh, [], "neue zaehlende Schluessel ohne _few in " + fewLocales.join(", "));
+  const stale = [...FEW_GAPS_LEGACY].filter((k) => !missing.has(k));
+  assert.deepEqual(stale, [], "erfuellte Eintraege aus FEW_GAPS_LEGACY streichen");
+});
+
+// Arabisch hat fuer ganze Zahlen die Kategorien zero, one, two, few, many, other:
+// der Basisschluessel traegt dort die few-Form (3-10, "أيام"), die fuer 2 (Dual)
+// und 11-99 ("يومًا") falsch ist. Die zwei Tageszaehler dieses Umbaus tragen
+// deshalb `_two` und `_many` (Codex-Review #1472). Der Bestand ist Teil der
+// Nachpflege aus FEW_GAPS_LEGACY und hier bewusst nicht mitgeprueft.
+test('Arabisch: die neuen Tageszaehler waehlen Dual und many statt der few-Form', async () => {
+  await setLocale('ar');
+  for (const key of ['birthdays.inDays', 'inventory.deadlineChipInDays']) {
+    const few = t(key, { count: 5, label: 'X' });
+    assert.notEqual(t(key, { count: 2, label: 'X' }).replace('2', '5'), few, `${key}: 2 braucht den Dual`);
+    assert.notEqual(t(key, { count: 11, label: 'X' }).replace('11', '5'), few, `${key}: 11 braucht die many-Form`);
+  }
+  await setLocale('de');
+});
+
+// Vorrats-Einheiten flektieren mit der Menge (Re-Critique 2026-09-27, W2):
+// „6 Dose", „3 Packung" standen im Vorrat und in der Uebersicht, weil beide
+// `t('pantry.units.X')` ohne count hinter die Zahl setzten. Geprueft wird der
+// geteilte Helfer MIT der echten t() UND dass beide Aufrufer ihn nehmen - ein
+// Helfer, den niemand ruft, misst nichts.
+test('Vorrat: die Einheit flektiert mit der Menge, auch in Bruchzahlen', async () => {
+  const { pantryQuantityLabel, PANTRY_UNITS } = await import('../public/utils/pantry-units.js');
+  const fmt = (locale) => (n) => new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(n);
+  await setLocale('de');
+  assert.equal(pantryQuantityLabel(6, 'can', { t, formatNumber: fmt('de') }), '6 Dosen');
+  assert.equal(pantryQuantityLabel(1, 'can', { t, formatNumber: fmt('de') }), '1 Dose');
+  assert.equal(pantryQuantityLabel(3, 'jar', { t, formatNumber: fmt('de') }), '3 Gläser');
+  assert.equal(pantryQuantityLabel(1.5, 'pkg', { t, formatNumber: fmt('de') }), '1,5 Packungen');
+  assert.equal(pantryQuantityLabel(250, 'g', { t, formatNumber: fmt('de') }), '250 g');
+  // Der Basisschluessel bleibt der Name der Einheit (Auswahlfeld ohne Menge).
+  assert.equal(t('pantry.units.can'), 'Dose');
+  // Unbekannte Einheit: Rohwert statt Schluessel.
+  assert.equal(pantryQuantityLabel(2, 'Kiste', { t, formatNumber: fmt('de') }), '2 Kiste');
+  await setLocale('en');
+  assert.equal(pantryQuantityLabel(2, 'bottle', { t, formatNumber: fmt('en') }), '2 bottles');
+  await setLocale('pl');
+  assert.equal(pantryQuantityLabel(2, 'can', { t, formatNumber: fmt('pl') }), '2 puszki');
+  assert.equal(pantryQuantityLabel(5, 'can', { t, formatNumber: fmt('pl') }), '5 puszek');
+  await setLocale('de');
+  // Jede Zaehleinheit traegt in de _one und _other (Paritaet ueber test:i18n).
+  // Die metrischen Symbole flektieren nicht („5 g") und brauchen keine Variante.
+  const units = localeFile('de').pantry.units;
+  for (const unit of PANTRY_UNITS.filter((u) => !['g', 'kg', 'ml', 'l'].includes(u))) {
+    assert.ok(units[`${unit}_one`] && units[`${unit}_other`], `pantry.units.${unit}_one/_other fehlt`);
+  }
+});
+
+test('Vorrat und Uebersicht setzen die Menge ueber den flektierenden Helfer', () => {
+  const strip = (src) => {
+    let out = src;
+    for (let prev = ''; prev !== out;) { prev = out; out = out.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, ''); }
+    return out;
+  };
+  const body = (src, name) => {
+    const at = src.indexOf(`function ${name}(`);
+    assert.ok(at >= 0, `${name} fehlt`);
+    return src.slice(at, src.indexOf('\n}\n', at));
+  };
+  const pantry = strip(readFileSync(new URL('../public/pages/pantry.js', import.meta.url), 'utf8'));
+  const dashboard = strip(readFileSync(new URL('../public/pages/dashboard.js', import.meta.url), 'utf8'));
+  for (const [src, fn, file] of [[pantry, 'quantityText', 'pantry.js'], [pantry, 'shortfallText', 'pantry.js'],
+    [dashboard, 'pantryQuantityText', 'dashboard.js']]) {
+    const own = body(src, fn);
+    assert.match(own, /pantryQuantityLabel\(/, `${file} ${fn}: Menge ohne flektierende Einheit („6 Dose")`);
+    assert.doesNotMatch(own, /pantry\.units\.\$\{|unitLabel\(/, `${file} ${fn}: setzt den Singular selbst hinter die Zahl`);
+  }
 });

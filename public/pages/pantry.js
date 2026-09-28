@@ -22,6 +22,7 @@ import { renderKitchenTabsBar } from '/utils/kitchen-tabs.js';
 import { resolveShoppingTarget, announceTransfer, mayTransferPantryToShopping } from '/utils/kitchen-transfer.js';
 import { renderSkeletonList } from '/utils/skeleton.js';
 import { renderPageSearch, wirePageSearch } from '/utils/page-search.js';
+import { pageToolsMenuHtml, installPopoverMenus } from '/utils/popover-menu.js';
 // Alias, weil dieses Modul selbst eine `emptyStateEl()`-Funktion hat, die den
 // Renderer mit den Vorrats-Texten füllt.
 import { emptyStateEl as emptyStateComponentEl, mountLoadError } from '/utils/empty-state.js';
@@ -30,7 +31,7 @@ import { todayKey } from '/utils/date.js';
 import { DEFAULT_CATEGORY_NAME, categoryLabel } from '/utils/shopping-categories.js';
 import { locationLabel } from '/utils/pantry-locations.js';
 import { setBulkPill, clearBulkPill } from '/utils/bulk-pill.js';
-import { PANTRY_UNITS, normalizePantryQuantity, pantryUnitStep } from '/utils/pantry-units.js';
+import { PANTRY_UNITS, normalizePantryQuantity, pantryUnitStep, pantryQuantityLabel } from '/utils/pantry-units.js';
 import {
   PANTRY_FILTERS,
   daysUntil,
@@ -136,8 +137,9 @@ function unitLabel(unit) {
   return label === key ? String(unit ?? '') : label;
 }
 
+/** „6 Dosen", nicht „6 Dose": die Einheit flektiert mit der Menge (W2). */
 function quantityText(item) {
-  return `${formatQuantity(item.quantity)} ${unitLabel(item.unit)}`;
+  return pantryQuantityLabel(item.quantity, item.unit, { t, formatNumber: formatQuantity });
 }
 
 /**
@@ -293,33 +295,47 @@ export async function render(container) {
   // layout.css): Suche im __center-Slot, Lagerort-Verwaltung im __actions-Slot -
   // dieselbe Slot-Ordnung wie in den drei Geschwister-Tabs.
   const toolbar = document.createElement('div');
-  // --narrow: der Kopf endet beim Lesemaß der Liste darunter (.list-scroller),
-  // nicht an der Content-Spalte. Siehe layout.css.
-  toolbar.className = 'page-toolbar page-toolbar--in-group page-toolbar--narrow';
+  // Kein --narrow (Re-Critique 2026-09-27, D3): der Kuechenkopf gehoert der
+  // Kuechen-Leiste und endet an ihrer Kante wie in den drei Geschwister-Tabs -
+  // sonst sprang die angedockte Primaeraktion beim Tabwechsel zwischen
+  // Lesemass (x 865) und Leistenkante (x 1288). Test: test-meals.js (D3).
+  toolbar.className = 'page-toolbar page-toolbar--in-group';
+  // Die Suche IST der Center-Slot (Re-Critique 2026-09-27, D4): Breite und
+  // Stelle traegt page-search.css, wie in Dokumenten - kein Wrapper.
   toolbar.insertAdjacentHTML('beforeend', `
-    <div class="page-toolbar__center">
-      ${renderPageSearch({
-        id: 'pantry-search',
-        // Label und Placeholder aus demselben Key: „Vorrat durchsuchen" benennt
-        // das Feld vollständig, wie in notes/contacts/documents. Ein eigener
-        // Label-Key wäre ein Schlüssel über 23 Locales ohne zusätzliche Aussage.
-        label: t('pantry.searchPlaceholder'),
-        placeholder: t('pantry.searchPlaceholder'),
-        value: state.query,
-        clearLabel: t('common.searchClear'),
-        className: 'pantry-search',
-      })}
-    </div>
+    ${renderPageSearch({
+      id: 'pantry-search',
+      // Label und Placeholder aus demselben Key: „Vorrat durchsuchen" benennt
+      // das Feld vollständig, wie in notes/contacts/documents. Ein eigener
+      // Label-Key wäre ein Schlüssel über 23 Locales ohne zusätzliche Aussage.
+      label: t('pantry.searchPlaceholder'),
+      placeholder: t('pantry.searchPlaceholder'),
+      value: state.query,
+      clearLabel: t('common.searchClear'),
+      className: 'pantry-search page-toolbar__center',
+    })}
     <div class="page-toolbar__actions">
-      <button class="btn btn--ghost btn--icon" data-action="manage-locations"
-              aria-label="${esc(t('pantry.manageLocations'))}" title="${esc(t('pantry.manageLocations'))}">
-        <i data-lucide="archive" class="icon-md" aria-hidden="true"></i>
-      </button>
+      ${pageToolsMenuHtml({
+        id: 'pantry-tools-menu',
+        label: t('common.moreActions'),
+        // KUECHENKOPF (Kopfregel mobil, 2026-09-26): die Verwaltung steht im
+        // EINEN Werkzeugmenue, nicht als loses Icon im Kopf. Das Zeichen ist
+        // map-pin wie im Inventar - "archive" war dasselbe Zeichen wie der
+        // Vorrat-Tab darueber (A4, P3).
+        items: [{ action: 'manage-locations', label: t('pantry.manageLocations'), icon: 'map-pin' }],
+      })}
     </div>`);
 
+  // DIE CHIPREIHE STEHT IM SCROLLPORT (Kopfregel mobil, Regel 3): als erstes
+  // Kind von #pantry-list scrollt sie mit der Liste weg, statt dauerhaft 60px
+  // ueber dem Port zu belegen (A8: fix bis y181). renderList() ersetzt nur,
+  // was HINTER ihr steht.
   const filters = document.createElement('div');
-  filters.className = 'pantry-filters';
+  filters.className = 'page-chip-row pantry-filters';
   filters.id = 'pantry-filters';
+  filters.setAttribute('role', 'group');
+  filters.setAttribute('aria-label', t('common.filters'));
+  filters.hidden = true;
 
   // Hier stand der Slot für die Sammelaktions-Leiste. Sie ist seit Etappe 5
   // eine Pille in der unteren Shell-Zone (utils/bulk-pill.js) und braucht in
@@ -330,6 +346,7 @@ export async function render(container) {
   list.className = 'list-scroller page-scrollport pantry-list';
   list.id = 'pantry-list';
   list.setAttribute('aria-busy', 'true');
+  list.append(filters);
   list.insertAdjacentHTML('beforeend', renderSkeletonList({ rows: 6, lines: 2 }));
 
   const fab = document.createElement('button');
@@ -340,7 +357,22 @@ export async function render(container) {
   fab.dataset.dockLabel = t('newLabel.pantry');
   fab.insertAdjacentHTML('beforeend', '<i data-lucide="plus" aria-hidden="true"></i>');
 
-  page.append(title, live, toolbar, filters, list, fab);
+  // DAS NEBENPANEL „IM BLICK" (Re-Critique 2026-09-27, A4 P1 / R10 L4): am
+  // Desktop steht neben der Liste fest, was bald ablaeuft oder knapp wird -
+  // dieselben drei Fragen wie die Filterchips, nur ohne dass man sie stellen
+  // muss. Unter der Schwelle blendet es CSS aus; dort tragen die Chips die
+  // Frage. Liste und Panel teilen einen Koerper, weil ein Container sich
+  // selbst nicht umstellen kann (die Abfrage steht an `.pantry-page`).
+  const body = document.createElement('div');
+  body.className = 'pantry-body';
+  const watch = document.createElement('aside');
+  watch.className = 'pantry-watch';
+  watch.id = 'pantry-watch';
+  watch.setAttribute('aria-label', t('pantry.watchLabel'));
+  watch.hidden = true;
+  body.append(list, watch);
+
+  page.append(title, live, toolbar, body, fab);
   container.replaceChildren(page);
   renderKitchenTabsBar(container, '/pantry');
 
@@ -362,6 +394,7 @@ export async function render(container) {
     },
   });
 
+  installPopoverMenus(toolbar);
   toolbar.querySelector('[data-action="manage-locations"]').addEventListener('click', openLocationManager);
   fab.addEventListener('click', () => openItemModal('create'));
 
@@ -374,6 +407,7 @@ export async function render(container) {
   });
 
   list.addEventListener('click', onListClick);
+  watch.addEventListener('click', onWatchClick);
 
   try {
     await loadPantry();
@@ -546,8 +580,11 @@ function renderList() {
   const list = _container?.querySelector('#pantry-list');
   if (!list) return;
   list.removeAttribute('aria-busy');
-  list.replaceChildren();
+  // Die Chipreihe ist das erste Kind des Ports und ueberlebt den Neuaufbau.
+  const chipRow = list.querySelector(':scope > #pantry-filters');
+  list.replaceChildren(...(chipRow ? [chipRow] : []));
   renderBulkBar();
+  renderWatch();
 
   if (!state.items.length) {
     list.appendChild(emptyStateEl());
@@ -596,13 +633,113 @@ function renderList() {
     }
 
     const rows = document.createElement('ul');
-    rows.className = 'list-rows pantry-rows';
+    rows.className = 'row-carrier pantry-rows';
     for (const item of group.items) rows.appendChild(rowEl(withIntent(item)));
     section.appendChild(rows);
     list.appendChild(section);
   }
 
   if (window.lucide) window.lucide.createIcons({ el: list });
+}
+
+// --------------------------------------------------------
+// Nebenpanel „Im Blick" (Desktop)
+// --------------------------------------------------------
+
+// NUR ZEITKRITISCHES (Re-Critique 2026-09-28, P7 / A4 P2-6). Hier stand auch
+// "Fast leer": dieselbe Aussage stand damit dreimal da (Zeilen-Badge, Chip mit
+// Zaehler, Panel), 14 von 21 Artikeln rechts ein zweites Mal, und "Fast leer
+// 10" uebertoente die Fristen. Das Panel beantwortet jetzt nur, was nicht
+// warten kann; "Fast leer" bleibt Chip plus Warenkorb an der Zeile.
+const WATCH_SECTIONS = [
+  { key: 'expired', label: 'pantry.filterExpired', icon: 'circle-alert', tone: 'danger' },
+  { key: 'soon', label: 'pantry.filterSoon', icon: 'clock', tone: 'warning' },
+];
+
+/**
+ * Die drei Abschnitte des Panels, mit genau der Zuordnung der Filterchips
+ * (`matchesPantryFilter`) - ein Artikel steht im Panel, wenn und weil ihn der
+ * gleichnamige Chip traefe. Unabhaengig von Suche und aktivem Filter: das
+ * Panel beantwortet „was braucht Aufmerksamkeit", nicht „was zeigt die Liste".
+ * Sortiert wie die flache Filterliste: Ablauf nach Datum, Bestand nach Menge.
+ */
+function pantryWatchGroups(items, today) {
+  return WATCH_SECTIONS.map((section) => {
+    const rows = items.filter((item) => matchesPantryFilter(item, section.key, today));
+    rows.sort((a, b) => String(a.expires_on).localeCompare(String(b.expires_on)));
+    return { ...section, items: rows };
+  }).filter((section) => section.items.length);
+}
+
+function watchRowEl(item, section) {
+  const li = document.createElement('li');
+  li.className = 'list-row pantry-watch__row';
+  const main = document.createElement('button');
+  main.type = 'button';
+  main.className = 'list-row__main list-row__main--interactive';
+  main.dataset.watchId = String(item.id);
+  const name = document.createElement('span');
+  name.className = 'list-row__name';
+  name.textContent = item.name;
+  const meta = document.createElement('span');
+  meta.className = 'list-row__meta';
+  // Der Satz der Zeile („Laeuft morgen ab"), in der Tinte seiner Dringlichkeit.
+  const expiry = expiryBadge(item);
+  const lead = document.createElement('span');
+  lead.className = `pantry-watch__due pantry-watch__due--${expiry ? expiry.tone : section.tone}`;
+  lead.textContent = expiry ? expiry.text : quantityText(item);
+  meta.appendChild(lead);
+  if (item.location_name) meta.append(` · ${locationLabel(item.location_name)}`);
+  main.append(name, meta);
+  li.appendChild(main);
+  return li;
+}
+
+/** Zeichnet das Panel neu; ohne Artikel bleibt es verborgen. */
+function renderWatch() {
+  const watch = _container?.querySelector('#pantry-watch');
+  if (!watch) return;
+  watch.replaceChildren();
+  if (!state.items.length) {
+    watch.hidden = true;
+    return;
+  }
+  watch.hidden = false;
+  const groups = pantryWatchGroups(state.items.map(withIntent), state.todayKey);
+  if (!groups.length) {
+    const calm = document.createElement('p');
+    calm.className = 'pantry-watch__empty';
+    calm.textContent = t('pantry.watchEmpty');
+    watch.appendChild(calm);
+    return;
+  }
+  for (const section of groups) {
+    const el = document.createElement('section');
+    el.className = 'list-group pantry-watch__group';
+    const heading = document.createElement('h2');
+    heading.className = 'list-group__title';
+    heading.insertAdjacentHTML('beforeend', `<i data-lucide="${esc(section.icon)}" class="icon-sm" aria-hidden="true"></i>`);
+    const label = document.createElement('span');
+    label.textContent = t(section.label);
+    const count = document.createElement('span');
+    count.className = 'list-group__count';
+    count.textContent = String(section.items.length);
+    heading.append(label, count);
+    const rows = document.createElement('ul');
+    rows.className = 'row-carrier';
+    for (const item of section.items) rows.appendChild(watchRowEl(item, section));
+    el.append(heading, rows);
+    watch.appendChild(el);
+  }
+  if (window.lucide) window.lucide.createIcons({ el: watch });
+}
+
+/** Eine Panelzeile oeffnet denselben Dialog wie ihre Zeile in der Liste. */
+function onWatchClick(e) {
+  const btn = e.target.closest('[data-watch-id]');
+  if (!btn) return;
+  const item = state.items.find((i) => i.id === Number(btn.dataset.watchId));
+  if (item) openItemModal('edit', item);
 }
 
 /**
@@ -1032,6 +1169,9 @@ function refreshRowQuantity(row, item) {
   row.querySelector('.pantry-row__cart-slot')?.replaceWith(fresh.querySelector('.pantry-row__cart-slot'));
 
   if (window.lucide) window.lucide.createIcons({ el: row });
+  // Das Panel spricht von denselben Mengen: ein Schritt, der einen Artikel
+  // unter den Mindestbestand bringt, gehoert sofort unter „Fast leer".
+  renderWatch();
 }
 
 // --------------------------------------------------------
@@ -1046,7 +1186,8 @@ function shortfallText(item) {
   if (item.min_quantity == null) return null;
   const missing = normalizePantryQuantity(Number(item.min_quantity) - Number(item.quantity), { fallback: 0 });
   if (missing <= 0) return null;
-  return `${formatQuantity(missing)} ${unitLabel(item.unit)}`;
+  // Derselbe Helfer wie die Zeile: auch auf dem Einkaufszettel „2 Dosen".
+  return pantryQuantityLabel(missing, item.unit, { t, formatNumber: formatQuantity });
 }
 
 async function sendToShopping(items, btn) {
@@ -1114,6 +1255,13 @@ async function sendToShopping(items, btn) {
 
 function openItemModal(mode, item = null) {
   const isEdit = mode === 'edit';
+  // Der Dialog zeigt den Artikel, wie ihn die Zeile zeigt: mit der Absicht
+  // eines Stepper-Schritts, dessen PATCH noch im Entprell-Fenster steht. Aus
+  // dem nackten Serverstand gefuellt stuende dort die alte Menge, und wer dann
+  // ein anderes Feld speichert, schriebe sie per PUT zurueck - der Schritt
+  // waere still verloren. Hier statt beim Aufrufer, weil Liste und Nebenpanel
+  // denselben Weg nehmen.
+  if (isEdit) item = withIntent(item);
   const locations = state.locations;
   const categories = state.categories;
 
@@ -1176,7 +1324,7 @@ function openItemModal(mode, item = null) {
         </div>`,
       { open: isEdit && (item.min_quantity != null || !!item.notes) })}
       <div class="modal-panel__footer modal-panel__footer--plain">
-        ${isEdit ? `<button type="button" class="btn btn--danger-ghost pantry-form__delete" id="pantry-delete">${esc(t('common.delete'))}</button>` : ''}
+        ${isEdit ? `<button type="button" class="btn btn--danger-outline pantry-form__delete" id="pantry-delete"><i data-lucide="trash-2" class="icon-md" aria-hidden="true"></i>${esc(t('common.delete'))}</button>` : ''}
         <button type="button" class="btn btn--secondary" data-action="close-modal">${esc(t('common.cancel'))}</button>
         <button type="button" class="btn btn--primary" id="pantry-save">${esc(isEdit ? t('common.save') : t('common.add'))}</button>
       </div>`,
@@ -1332,6 +1480,9 @@ async function openLocationManager() {
 export const __test = {
   state,
   adjustQuantity,
+  // Kopfregel mobil: die Chipreihe ist das erste Kind des Ports und muss den
+  // Neuaufbau der Liste ueberleben (test-pantry-ux.js).
+  renderList,
   loadPantry,
   intents,
   quantityOf,
@@ -1349,4 +1500,10 @@ export const __test = {
   // (test-shopping-readonly-ui.js).
   rowEl,
   sendToShopping,
+  // R10 L4: das Nebenpanel ordnet wie die Filterchips (test-pantry-ux.js).
+  pantryWatchGroups,
+  renderWatch,
+  // Beide Wege in den Bearbeiten-Dialog (test-pantry-ux.js).
+  onListClick,
+  onWatchClick,
 };

@@ -367,14 +367,26 @@ test('save confirmations preserve the same editor across repeated gates and keep
     }), true);
 
     // Delete callers omit the new option and still close on confirmation.
+    // Seit dem echten Ausgang (Critique 2026-09-26, P1-1) loest die Rueckfrage
+    // auf, sobald das Schliessen BEGINNT; abgehaengt wird das Overlay erst am
+    // Ende der Animation (Netz: MODAL_EXIT_FALLBACK_MS = 400). Gemessen wird
+    // die Regel, nicht der Zeitpunkt: beim Aufloesen laeuft der Ausgang schon
+    // (oder ist durch), und danach ist der Editor binnen zwei Sekunden weg. Ein
+    // Editor, der nie schliesst, bleibt damit rot.
     await page.evaluate(() => {
       window.saveGateTest.pending = window.saveGateTest.modal.confirmOverModal('Delete this event?');
     });
     await clickPastDeadTime(page, '#confirm-modal-ok');
     assert.deepEqual(await page.evaluate(async () => {
       const confirmed = await window.saveGateTest.pending;
-      return { confirmed, closeCount: window.saveGateTest.closeCount(), editorConnected: window.saveGateTest.editor.isConnected };
-    }), { confirmed: true, closeCount: 1, editorConnected: false });
+      const { editor } = window.saveGateTest;
+      return {
+        confirmed,
+        closeCount: window.saveGateTest.closeCount(),
+        closing: !editor.isConnected || editor.classList.contains('modal-overlay--closing'),
+      };
+    }), { confirmed: true, closeCount: 1, closing: true });
+    await page.waitForFunction(() => !window.saveGateTest.editor.isConnected, { timeout: 2000 });
   } finally {
     await page.close();
   }
@@ -386,6 +398,36 @@ test('save confirmations preserve the same editor across repeated gates and keep
 // Speichern-Knopf ins erste Feld. Unter Last war das Zufall; hier wird der Timer
 // fuer das eine Oeffnen auf 1500 ms gestreckt, damit er SICHER hinter dem
 // Fortsetzen liegt und die Sonde bei jedem Lauf misst, was vorher nur manchmal kam.
+// EIN TIPP BEENDET DIE BLENDE (2026-09-27). Solange die Wurzel-Transition eines
+// Seitenwechsels laeuft (~250-470ms), trifft Chromium jeden Zeiger nur auf
+// <html>, trotz `::view-transition { pointer-events: none }` - gemessen verpufften
+// Seitenleisten-Tipps 30 und 110ms nach dem Wechsel alle. swapPage bricht die
+// Blende beim ersten pointerdown ab: der erste Tipp bleibt verloren (sein Ziel
+// war schon <html>), der zweite erreicht die neue Seite.
+test('ein zweiter Tipp waehrend des Seitenwechsels erreicht die Seitenleiste', async () => {
+  const page = await openPage(harness, { device: 'desktop', locale: 'de' });
+  try {
+    const tapNotes = async () => {
+      const box = await (await page.$('.nav-sidebar [data-route="/notes"]')).boundingBox();
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    };
+    await page.evaluate(() => window.yuvomi.navigate('/calendar'));
+    await page.waitForFunction(() => location.pathname === '/calendar' && !document.documentElement.classList.contains('navigating'));
+    await page.evaluate(() => window.yuvomi.navigate('/tasks'));
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(await page.evaluate(() => document.documentElement.classList.contains('navigating')), true,
+      'Vorbedingung: der Wechsel laeuft noch als View Transition - sonst misst die Sonde nichts');
+    await tapNotes();
+    await new Promise((r) => setTimeout(r, 80));
+    await tapNotes();
+    await page.waitForFunction(() => location.pathname === '/notes', { timeout: 3000 }).catch(() => {});
+    assert.equal(await page.evaluate(() => location.pathname), '/notes',
+      'der zweite Tipp auf "Notizen" verpuffte waehrend der Blende');
+  } finally {
+    await page.close();
+  }
+});
+
 test('der verspaetete Erstfokus nimmt dem fortgesetzten Speichern-Tor den Fokus nicht weg (#1156)', async () => {
   const page = await openPage(harness, { device: 'desktop', locale: 'de' });
   try {
@@ -511,6 +553,16 @@ async function openCalendarSaveGateEditor(page, { wholeSeriesOnly = false } = {}
   }, wholeSeriesOnly);
   await page.evaluate((path) => window.yuvomi.navigate(path), `/calendar?open=${seriesId}&date=2048-04-03`);
   await page.waitForSelector('#detail-popover-edit, #detail-view-edit');
+  // ERST NACH DEM SEITENWECHSEL KLICKEN (Critique 2026-09-26, P2-1). Der Wechsel
+  // laeuft seit R3 als View Transition, und solange sie laeuft, trifft Chromium
+  // jeden Klick auf <html> - trotz `::view-transition { pointer-events: none }`
+  // (gemessen: elementsFromPoint liefert nur HTML). Der Deep-Link oeffnet das
+  // Popover schon ~170ms nach dem Start, die Transition endet ~250ms spaeter;
+  // ein sofortiger Klick schloss das Popover als Aussenklick, und der Editor kam
+  // nie. Das Fenster ist kuerzer als eine menschliche Reaktion, und die Sonde
+  // misst das Speichern-Tor, nicht den Seitenwechsel. `navigating` faellt mit
+  // `finished` der Transition (router.js).
+  await page.waitForFunction(() => !document.documentElement.classList.contains('navigating'));
   await page.click('#detail-popover-edit, #detail-view-edit');
   await page.waitForSelector('#modal-title');
   await page.evaluate(() => {
@@ -639,7 +691,7 @@ test('PR2 #975 - das zusammengesetzte Kalenderformular und seine Seriennamen ble
   const title = 'PR2 Serienprobe 975';
   try {
     await gotoRoute(page, '/calendar');
-    await page.click('#cal-add');
+    await page.click('#fab-new-event');
     await page.waitForSelector('#modal-title');
 
     const hints = await page.evaluate((eventTitle) => {
@@ -1034,9 +1086,14 @@ const SHAPE_EXEMPT = new Map([
   ['cal-toolbar__view-btn', 'Zustandsschalter: Segment der Kalender-Ansicht'],
   ['ydp__trigger', 'Griff: Feld-Oeffner des Datepickers, traegt Feldkante'],
   ['more-sheet__search', 'Griff: Suchfeld des More-Sheets, traegt Feldkante'],
-  ['theme-toggle__btn', 'Zustandsschalter: Segment der Farbwelt-Wahl'],
+  // Das Kanon-Segment (panel.css, DESIGN.md: konzentrisch eingesetzte
+  // .segmented__item im radius-md-Traeger). Es stand bis 2026-09-25 auf keiner
+  // gemessenen Route im Bild; seit der Dokumente-Critique traegt der Status
+  // Aktiv/Archiviert es direkt auf /documents.
+  ['segmented__item', 'Zustandsschalter: Segment des geteilten Segmented Controls (panel.css)'],
   // 3. Zellen eines Rasters
-  ['month-day', 'Rasterzelle: Tag im Kalender-Monat'],
+  // `.month-day` stand hier, bis die Monatszelle 2026-09-24 vom role="button" zur
+  // gridcell eines ARIA-Grids wurde - Sonde 3 misst sie seitdem nicht mehr.
   ['more-action', 'Rasterzelle: Kachel im More-Sheet-Raster'],
   ['metric-card--select', 'Rasterzelle: waehlbare Kennzahlkachel (.metric-card, Block-2-Konsolidierung)'],
   // Die Zyklus-Kachel ist seit #1181 ein <button>, der als GANZE Kachel zum
@@ -1047,9 +1104,25 @@ const SHAPE_EXEMPT = new Map([
   // Nachbarn - dieselbe Begruendung wie bei .cal-task-chip. Gefunden vom
   // Handlauf des Releases v2.67.0, dem ersten vollen Lauf seit dem Merge.
   ['health-overview__card--link', 'Rasterzelle: klickbare Kachel der Health-Uebersicht, gleiche Optik wie die Nachbarkacheln (.health-overview__card)'],
+  // Terminbloecke sind seit der Kalender-Critique 2026-09-24 (P1) Knoepfe:
+  // vorher trugen sie nur `cursor: pointer`, per Tastatur war kein Termin der
+  // Woche zu oeffnen. Ihre Form ist die des Zeitrasters, in dem sie stehen -
+  // ein Block ueber seine Dauer, die Kante im Vollton (DESIGN.md, Event-Bloecke).
+  // Eine Kapsel ueber 90 Minuten waere keine Buttonform, sondern ein Fehler.
+  ['week-event', 'Rasterzelle: Terminblock im Zeitraster der Woche, Hoehe = Dauer'],
+  ['day-event', 'Rasterzelle: Terminblock im Zeitraster des Tages, Hoehe = Dauer'],
+  ['allday-event', 'Rasterzelle: Ganztags-Balken der Woche/des Tages, gleiche Bar wie .month-day__event'],
+  // Seit R9 M13 (Re-Critique 2026-09-27) oeffnet die Notizkarte als GANZE
+  // Karte: der Oeffnen-Knopf liegt unsichtbar ueber ihr (notes.css, keine
+  // Flaeche, keine Kante) und erbt ihren Radius nur, damit der Fokusring die
+  // Karte umrahmt. Die Form, die man sieht und tippt, ist die der Karte - und
+  // die Notizen sind laut DESIGN.md („Drei Flaechen sind AUSDRUECKLICH keine
+  // Zeilenliste") ein Raster, keine Zeilenliste. Dieselbe Begruendung wie bei
+  // `.health-overview__card--link`: eine Kapsel waere hier eine zweite Form
+  // neben den gleichen Karten des Rasters.
+  ['note-card__open', 'Rasterzelle: ganze Notizkarte als Oeffner im Notizraster (Masonry, DESIGN.md)'],
   // 4. Zeilen einer Zeilenliste
   ['nav-item', 'Zeile: Eintrag der Sidebar-Navigation'],
-  ['settings-shell__navigation-toggle', 'Zeile: Domaenenkopf der Settings-Navigation (Akkordeon)'],
   ['note-item', 'Zeile: Notiz im Dashboard-Widget'],
   ['rw-standing__id', 'Zeile: Oeffner einer Mitglieds-Zeile'],
   ['documents-folder-item__select', 'Zeile: Ordner in der Dokumentenliste'],
@@ -1713,6 +1786,15 @@ async function metricRowHeights(page) {
   return page.evaluate(() => {
     const carriers = new Map();
     for (const card of document.querySelectorAll('.metric-card')) {
+      // EINE KARTE OHNE KASTEN IST KEINE KACHEL DER REIHE. `display: none`
+      // (selbst oder an einem Vorfahren) erzeugt kein Rasterelement und keine
+      // Zelle - die Reihe hat dann eine Karte weniger, keine leere. Gemessen
+      // lieferte so eine Karte `top 0, Hoehe 0`, galt damit als eigene
+      // Rasterzeile und als Kachel der Hoehe 0: die Abrechnung blendet ihre
+      // Gruppen-Kachel mobil per Container-Query aus (R10 L11), und die Sonde
+      // meldete „Hoehen 59, 59, 0". Gefiltert wird NUR, was gar keinen Kasten
+      // hat; eine gerenderte Karte der Hoehe 0 bleibt ein Befund.
+      if (!card.getClientRects().length) continue;
       const parent = card.parentElement;
       if (!parent) continue;
       if (!carriers.has(parent)) carriers.set(parent, []);
@@ -2051,7 +2133,16 @@ async function headDocking(page) {
   });
 }
 
-/** Scrollt jeden Port bis ans Ende und meldet die groesste gefundene Reserve. */
+/**
+ * Scrollt jeden Port bis ans Ende und meldet die groesste gefundene Reserve.
+ *
+ * MIT DER GESTE DAVOR: seit der Re-Kritik 2026-09-25 klappt ein gedeckelter
+ * Kopf (Budget, Kalender, Notizen, Kontakte) nur auf einen Scroll ein, dem
+ * eine Nutzergeste im selben Port vorausging (`wireCollapsingHeader`,
+ * utils/ux.js) - sonst klappte der Sprung der Woche auf „jetzt" ihn ein. Ein
+ * blosses `scrollTop` ist fuer die Shell genau so ein Sprung; das Rad-Ereignis
+ * davor macht daraus den Nutzer-Scroll, den diese Sonde nachstellen will.
+ */
 async function scrollEveryPort(page) {
   return page.evaluate(() => {
     let most = 0;
@@ -2059,6 +2150,7 @@ async function scrollEveryPort(page) {
       const oy = getComputedStyle(el).overflowY;
       const reserve = el.scrollHeight - el.clientHeight;
       if ((oy === 'auto' || oy === 'scroll') && reserve > 8) {
+        el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: reserve }));
         el.scrollTop = reserve;
         most = Math.max(most, reserve);
       }
@@ -3740,6 +3832,13 @@ async function fabAtScrollEnd(page) {
     res.unterFab = [];
     for (const el of document.querySelectorAll(SEL)) {
       if (el === fab || fab.contains(el) || el.contains(fab)) continue;
+      // DER SCROLLPORT UND WAS IHN UMSCHLIESST IST KEIN ZIEL UNTER DEM KNOPF,
+      // sondern die Flaeche, auf der alles scrollt. Seit der Inhalt mobil unter die
+      // Glas-Kapsel laeuft (Kopfregel mobil, 2026-09-26), reicht der Port bis zur
+      // Unterkante und liegt damit immer auch unter dem FAB. Budget legt um seinen
+      // Port ein fokussierbares Tabpanel (`#budget-body`, tabindex=0) und wurde
+      // deshalb mit „div (1 %)" gemeldet. Was IM Port liegt, prueft die Sonde weiter.
+      if (scroller && (el === scroller || el.contains(scroller))) continue;
       const cs = getComputedStyle(el);
       if (cs.display === 'none' || cs.visibility === 'hidden' || cs.pointerEvents === 'none') continue;
       const b = el.getBoundingClientRect();
@@ -3771,15 +3870,19 @@ describe('Sonde 18 - am Scroll-Ende liegt nichts Bedienbares unter dem FAB', () 
       const page = await openPage(harness, { device, theme: 'light', locale: 'de' });
       const findings = [];
       let seen = 0;
-      let angedockt = 0;
-      let eingeklappt = 0;
+      const angedockt = [];
+      const eingeklappt = [];
+      const schwebend = [];
       let ohneFab = 0;
 
       for (const name of sweep('Sonde 18')) {
         await gotoRoute(page, ALL_ROUTES[name]);
         const m = await fabAtScrollEnd(page);
-        if (m.angedockt) angedockt += 1;
-        if (m.eingeklappt) eingeklappt += 1;
+        if (m.angedockt) angedockt.push(name);
+        if (m.eingeklappt) eingeklappt.push(name);
+        // Unabhaengig vom Scrollstand: ob ein Knopf schwebt, ist eine Frage
+        // der Seite, nicht davon, ob die Messung ihr Ende erreicht hat.
+        if (!m.keinFab) schwebend.push(name);
 
         /* Der Nachlauf darf den Scrollport nicht verkuerzen: das war die Marge,
          * und ihr Preis war die abgeschnittene Widget-Reihe.
@@ -3810,11 +3913,11 @@ describe('Sonde 18 - am Scroll-Ende liegt nichts Bedienbares unter dem FAB', () 
       }
       await page.close();
 
-      /* AM ZEIGER SCHWEBT SEIT ETAPPE 2 FAST KEIN FAB MEHR, und damit hat die
-       * Frage dieser Sonde dort kaum noch einen Gegenstand. Sie prueft deshalb
-       * zuerst die AUFTEILUNG - wer andockt, wer einklappt, wer keinen hat -
-       * und misst die Ueberlappung nur noch fuer den einen, der wirklich
-       * schwebt.
+      /* AM ZEIGER SCHWEBT SEIT R14 KEIN FAB MEHR (seit Etappe 2 nur noch das
+       * Speed-Dial der Uebersicht), und damit hat die Frage dieser Sonde dort
+       * keinen Gegenstand. Sie prueft deshalb zuerst die AUFTEILUNG - wer
+       * andockt, wer einklappt, wer keinen hat - und misst die Ueberlappung
+       * fuer jeden, der wieder schwebt.
        *
        * WARUM DAS KEIN NACHGEBEN IST: die alte Fassung hat auf dem Zeiger nicht
        * etwa nichts gefunden, sie hat FALSCH gefunden. Sie mass die
@@ -3830,33 +3933,47 @@ describe('Sonde 18 - am Scroll-Ende liegt nichts Bedienbares unter dem FAB', () 
        * Inhalt - dass am Scroll-Ende trotzdem nichts Bedienbares unter ihm
        * liegt, ist genau die Zusage, die zu pruefen bleibt. */
       if (device === 'desktop') {
-        /* GENAU EINER SCHWEBT DORT NOCH, und das ist eine Entscheidung, keine
-         * Luecke: das Speed-Dial des Dashboards dockt bewusst nicht an, weil es
-         * ein MENUE ist und ein halber Umzug schlechter waere als keiner
-         * (dc23972f). Fuer ihn gilt die Frage dieser Sonde weiter, und er ist
-         * der einzige Fall, in dem sie auf dem Zeiger ueberhaupt etwas misst. */
-        assert.equal(seen, 1,
-          `Auf dem Zeigergeraet schwebt genau ein FAB ueber dem Inhalt (das Dashboard-Speed-Dial), `
-          + `gemessen wurden ${seen}. Entweder dockt ein Modul nicht mehr an, oder die Einklapp-Regel greift nicht.`);
-        // Die Aufteilung wird MITGEPRUEFT, nicht nur abgezogen: sonst verschwiege
-        // die Sonde still, dass ein Modul seinen FAB ganz verloren hat.
-        /* NUR die beiden Zahlen, die dieser Sonde gehoeren. `ohneFab` waere die
-         * dritte, aber der Sweep faehrt ausser den 15 Modulrouten auch jedes
-         * Einstellungs-Blatt an - gemessen 29 statt 3, und diese Zahl haengt an
+        /* AM ZEIGER SCHWEBT KEINER MEHR - DAS IST DIE REGEL, NICHT EINE ZAHL.
+         *
+         * Bis R14 schwebte genau einer, das Speed-Dial der Uebersicht, und die
+         * Sonde fragte nach `seen === 1`. Seit R14 (A8 P3-2, #1493) traegt die
+         * Uebersicht am Desktop „+ Neu" als angedockte Pille im Kopf mit
+         * demselben Menue; die Zahl 1 wurde damit zu 0 und die Sonde rot, ohne
+         * dass sich an der Zusage etwas geaendert haette. Gefragt wird deshalb
+         * die Regel selbst: auf dem Zeigergeraet schwebt KEIN Knopf ueber dem
+         * Inhalt, jeder dockt an. Wer wieder schwebt, steht hier mit Namen -
+         * und die Ueberlappungsfrage oben misst ihn trotzdem weiter.
+         *
+         * Gegengeprueft: mit einem Riegel in `dockFabIntoToolbar` (router.js),
+         * der /tasks nicht andocken laesst, wird diese Zeile rot und nennt
+         * `tasks`. */
+        assert.deepEqual(schwebend, [],
+          'Auf dem Zeigergeraet schwebt kein FAB ueber dem Inhalt - jede Primaeraktion dockt im Kopf an '
+          + '(seit R14 auch die Uebersicht als Pille "+ Neu"). Es schweben: ' + schwebend.join(', '));
+        /* Die Aufteilung wird MITGEPRUEFT, nicht nur abgezogen: sonst verschwiege
+         * die Sonde still, dass ein Modul seinen FAB ganz verloren hat. Mit
+         * NAMEN, nicht als Zahl - die Meldung sagt dann, wer fehlt.
+         *
+         * `ohneFab` gehoert nicht hierher: der Sweep faehrt ausser den
+         * Modulrouten auch jedes Einstellungs-Blatt an, und diese Zahl haengt an
          * der Zahl der Einstellungsseiten, nicht am FAB. Ein Modul, das seinen
-         * FAB verliert, faellt trotzdem auf: es fehlt dann in einem der beiden
-         * Toepfe hier. */
-        assert.deepEqual({ angedockt, eingeklappt }, { angedockt: 5, eingeklappt: 6 },
-          'Erwartet auf dem Zeiger: 5 FABs in der Kopfleiste (Vorrat, Mahlzeiten, Rezepte, '
-          + 'Geburtstage, Dokumente) und 6 eingeklappte (dort traegt der Modulkopf seinen eigenen '
-          + `Knopf). Gezaehlt wurden ${angedockt} und ${eingeklappt}, dazu ${ohneFab} Seiten ohne FAB. `
-          + 'Aendert sich das, aendert sich die Reichweite dieser Sonde.');
+         * FAB verliert, faellt trotzdem auf: es fehlt dann in der Liste hier.
+         *
+         * Einkauf dockt seit der Kopfregel mobil (2026-09-26) an, Aufgaben,
+         * Notizen, Kontakte, Kalender und Budget seit #1483 ("one add button"),
+         * die Uebersicht seit R14. Eingeklappt ist keiner mehr. */
+        const ANGEDOCKT_AM_ZEIGER = ['dashboard', 'tasks', 'calendar', 'shopping', 'meals', 'recipes',
+          'pantry', 'notes', 'contacts', 'birthdays', 'budget', 'documents'];
+        assert.deepEqual({ angedockt: [...angedockt].sort(), eingeklappt },
+          { angedockt: [...ANGEDOCKT_AM_ZEIGER].sort(), eingeklappt: [] },
+          `Erwartet auf dem Zeiger: ${ANGEDOCKT_AM_ZEIGER.length} FABs in der Kopfleiste und kein eingeklappter, `
+          + `dazu ${ohneFab} Seiten ohne FAB. Aendert sich das, aendert sich die Reichweite dieser Sonde.`);
       } else {
         // 15 Routen minus die drei ohne FAB.
         assert.ok(seen >= 12,
           `Nur ${seen} Zustaende am Scroll-Ende gemessen - erwartet sind mindestens 12. Entweder `
           + 'fehlt Modulen ihr FAB, oder keine Seite kam an ihr Scroll-Ende.');
-        assert.equal(angedockt, 0, 'am Finger dockt kein FAB an - der Platz dafuer ist die Nav-Kapsel');
+        assert.deepEqual(angedockt, [], 'am Finger dockt kein FAB an - der Platz dafuer ist die Nav-Kapsel');
       }
 
       assert.deepEqual(findings, [],
@@ -3995,7 +4112,7 @@ describe('Sonde 19 - in der regulaeren Groessenklasse traegt der Modulkopf eine 
                   // aus und nimmt `--content-max-width-narrow` NUR als
                   // Rueckfall fuer Seiten, die keins erklaeren. Diese Sonde las
                   // den Rueckfall von :root und meldete damit jede Seite mit
-                  // eigener Komposition als defekt - housekeeping ist
+                  // eigener Komposition als defekt - housekeeping war damals
                   // `app-page--data` (--layout-content, 60rem), sein Kopf endete
                   // korrekt bei 960px und wurde gegen 720px geprueft.
                   //
@@ -4343,7 +4460,7 @@ function holdNextNoteSave(page, { method = 'POST', noteId = null } = {}) {
 }
 
 async function openReadyNoteModal(page) {
-  await page.click('#notes-add-btn');
+  await page.click('#fab-new-note');
   await page.waitForSelector('#note-content');
   // Shared-modal initialization applies its first focus after 50 ms and takes
   // the dirty baseline after 150 ms. The 300 ms barrier includes both timers
@@ -5103,7 +5220,9 @@ test('Sonde 24 - spaeter Umbenennungskonflikt ersetzt keinen neuen Notizeditor',
     }, { firstName: renamedCategory, secondName: conflictingCategory });
     await gotoRoute(page, '/notes');
 
-    await page.click('#notes-manage-categories');
+    // Seit der Kopfregel mobil (2026-09-26) ein Eintrag im Werkzeugmenue.
+    await page.click('.notes-toolbar .page-tools-btn');
+    await page.click('#notes-tools-menu [data-action="manage-categories"]');
     await page.waitForSelector(`yuvomi-category-manager .cat-row[data-key="${categoryIds[0]}"]`);
     await page.click(`yuvomi-category-manager .cat-row[data-key="${categoryIds[0]}"] .cat-row__name`);
     await page.waitForSelector('#prompt-modal-input');

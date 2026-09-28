@@ -12,7 +12,9 @@ import { esc } from '/utils/html.js';
 import { getReadableTextColor, AVATAR_FALLBACK_COLOR } from '/utils/color.js';
 import { openModal, closeModal, confirmModal, confirmOverModal, refocusAfterRender } from '/components/modal.js';
 import { createPageFab, setPageFabAction } from '/utils/fab.js';
+import { rowActionHtml } from '/utils/row-action.js';
 import { wireTablist } from '/utils/tablist.js';
+import { attachSegmentIndicator } from '/utils/segment-indicator.js';
 import { wireScrollFade } from '/utils/ux.js';
 import { renderSkeletonList } from '/utils/skeleton.js';
 import { emptyStateHTML, mountLoadError } from '/utils/empty-state.js';
@@ -242,13 +244,16 @@ let fab = null;
 // FAB-Aktion je Tab setzen (nur Admins erstellen; sonst ausgeblendet).
 function updateRewardsFab() {
   if (!fab) return;
-  if (readOnly()) { setPageFabAction(fab, { hidden: true }); return; }
+  // Ausgeblendet behaelt der Knopf sein Nomen: der Router dockt ihn am Desktop
+  // nur beim Seitenaufbau und nur mit `data-dock-label` an (siehe health.js).
+  const keepNoun = () => fab.dataset?.dockLabel || t('newLabel.rewards');
+  if (readOnly()) { setPageFabAction(fab, { hidden: true, dockLabel: keepNoun() }); return; }
   if (state.tab === 'catalog' && isAdmin()) {
-    setPageFabAction(fab, { label: t('rewards.addReward'), onClick: () => openRewardModal(null) });
+    setPageFabAction(fab, { label: t('rewards.addReward'), dockLabel: t('newLabel.rewards'), onClick: () => openRewardModal(null) });
   } else if (state.tab === 'ledger' && isAdmin()) {
-    setPageFabAction(fab, { label: t('rewards.grantBonus'), onClick: () => openBonusModal() });
+    setPageFabAction(fab, { label: t('rewards.grantBonus'), dockLabel: t('newLabel.rewardsBonus'), onClick: () => openBonusModal() });
   } else {
-    setPageFabAction(fab, { hidden: true });
+    setPageFabAction(fab, { hidden: true, dockLabel: keepNoun() });
   }
 }
 
@@ -258,6 +263,7 @@ function renderShell(container) {
     <div class="rewards-page app-page app-page--reading page-measure--narrow" data-composition="reading">
       <header class="page-toolbar page-toolbar--narrow rewards-toolbar">
         <h1 class="page-toolbar__title" id="rewards-title">${esc(t('rewards.title'))}</h1>
+        <div class="page-toolbar__actions"></div>
         <nav class="rewards-tabs page-toolbar__bar" role="tablist" aria-label="${esc(t('rewards.title'))}">
           ${tabButton('overview', 'trophy', t('rewards.tabOverview'))}
           ${tabButton('catalog', 'gift', t('rewards.tabCatalog'))}
@@ -271,9 +277,12 @@ function renderShell(container) {
     activeId: state.tab,
     onChange: (id) => { state.tab = id; renderCurrentTab(container); },
   });
+  // Geteilte gleitende Kapsel (Re-Critique 2026-09-27, D8); `key`, weil die
+  // Seite den Kopf bei jedem Aufruf neu baut.
+  attachSegmentIndicator(container.querySelector('.rewards-tabs'), { key: 'rewards-tabs' });
   // Scroll-Affordanz der Bar-Zeile (geteilter Peek-Fade, .page-toolbar__bar).
   wireScrollFade(container.querySelector('.rewards-tabs'));
-  fab = createPageFab({ id: 'rewards-fab' });
+  fab = createPageFab({ id: 'rewards-fab', dockLabel: t('newLabel.rewards') });
   container.querySelector('.rewards-page').appendChild(fab);
   updateRewardsFab();
   icons(container);
@@ -283,9 +292,28 @@ function content() {
   return document.getElementById('rewards-content');
 }
 
+/**
+ * DIE KOPFAKTION ENDET AN DER KANTE IHRES INHALTS (Re-Critique 2026-09-27,
+ * A3 P2-5 / R10 L7). Uebersicht und Verlauf sind Zeilenlisten auf dem
+ * Lesemass, der Katalog ist ein Raster ueber die volle Breite. Mit einem
+ * festen `--narrow` stand die angedockte Pille im Katalog bei 972, das Raster
+ * endete bei 1408 (1440er Fenster). Der Kopf folgt jetzt dem Reiter: gedeckelt,
+ * wo der Inhalt es ist, voll, wo das Raster es ist.
+ *
+ * EIN MODIFIER, NICHT DAS `--narrow` WEGNEHMEN: ohne `--narrow` passte die auf
+ * 720px gekappte Reiterleiste neben Titel und Pille in die erste Zeile, und der
+ * ganze Inhalt sprang 52px hoch (gemessen). `--wide` (rewards.css) gibt nur der
+ * Aktionszeile die volle Kante zurueck.
+ */
+function syncToolbarMeasure(container) {
+  container.querySelector('.rewards-toolbar')
+    ?.classList.toggle('rewards-toolbar--wide', state.tab === 'catalog');
+}
+
 async function renderCurrentTab(container) {
   const el = content();
   if (!el) return;
+  syncToolbarMeasure(container);
   el.replaceChildren();
   el.insertAdjacentHTML('beforeend', renderSkeletonList({ rows: 3 }));
   try {
@@ -438,7 +466,7 @@ function renderPendingPanel() {
           <button class="btn btn--primary btn--sm" type="button" data-decide="fulfill" data-id="${r.id}">${esc(t('rewards.approve'))}</button>
           <button class="btn btn--ghost btn--sm" type="button" data-decide="reject" data-id="${r.id}">${esc(t('rewards.reject'))}</button>
         ` : `
-          <button class="btn btn--ghost btn--sm" type="button" data-decide="cancel" data-id="${r.id}">${esc(t('common.cancel'))}</button>
+          <button class="btn btn--secondary btn--sm" type="button" data-decide="cancel" data-id="${r.id}">${esc(t('common.cancel'))}</button>
         `}
       </div>`}
     </li>`).join('');
@@ -506,7 +534,9 @@ function wireOverview(el) {
 function handleSetupStep(action) {
   if (action === 'participants') openParticipantsModal();
   else if (action === 'tasks') location.href = '/tasks';
-  else if (action === 'catalog') document.querySelector('[data-rw-tab="catalog"]')?.click();
+  // `data-tab-id` ist das Attribut der Reiter (tabButton); hier stand
+  // `data-rw-tab`, das es nie gab - der Schritt „Praemien anlegen" tat nichts.
+  else if (action === 'catalog') document.querySelector('.rewards-tabs [data-tab-id="catalog"]')?.click();
 }
 
 // --------------------------------------------------------
@@ -552,12 +582,10 @@ function renderRewardCard(item) {
         ${unitsLine}
       </div>
       <div class="rw-reward-card__foot">
-        <span class="rw-cost"><i data-lucide="coins" aria-hidden="true"></i>${esc(pointsLabel(item.cost))}</span>
+        <span class="rw-cost"><i data-lucide="coins" class="icon-md" aria-hidden="true"></i>${esc(pointsLabel(item.cost))}</span>
         <div class="rw-reward-card__actions">
-          ${isAdmin() && !readOnly() ? `
-            <button class="btn btn--icon btn--sm" type="button" data-edit="${item.id}" aria-label="${esc(t('common.edit'))}"><i data-lucide="pencil" aria-hidden="true"></i></button>
-          ` : ''}
-          ${canRedeemBtn ? `<button class="btn btn--secondary btn--sm" type="button" data-redeem-item="${item.id}"><i data-lucide="gift" aria-hidden="true"></i>${esc(redeemVerb())}</button>` : shortHint}
+          ${isAdmin() && !readOnly() ? rowActionHtml({ icon: 'pencil', label: t('common.editNamed', { name: item.name }), attrs: { 'data-edit': item.id } }) : ''}
+          ${canRedeemBtn ? `<button class="btn btn--secondary btn--sm" type="button" data-redeem-item="${item.id}"><i data-lucide="gift" class="icon-md" aria-hidden="true"></i>${esc(redeemVerb())}</button>` : shortHint}
         </div>
       </div>
     </article>`;
@@ -579,7 +607,7 @@ function renderCatalog(el) {
   } else {
     el.insertAdjacentHTML('beforeend', `
       <div class="rewards-content__inner">
-        <section class="rw-section">
+        <section class="rw-section rw-section--wide">
           ${header}
           <div class="rw-reward-grid">${items.map(renderRewardCard).join('')}</div>
         </section>
@@ -612,7 +640,12 @@ function renderLedger(el) {
   el.replaceChildren();
   const filterChips = [{ id: null, label: t('rewards.all') }]
     .concat(balances().map((b) => ({ id: b.id, label: b.display_name })))
-    .map((c) => `<button class="rw-chip${(state.ledgerFilter ?? null) === c.id ? ' rw-chip--active' : ''}" type="button" data-filter="${c.id ?? ''}">${esc(c.label)}</button>`)
+    // Kanon-Filterchip (Re-Critique 2026-09-28 P2-6): vorher `.rw-chip`, 31px
+    // hoch und ohne aria-pressed - der Screenreader hoerte nicht, wer gefiltert ist.
+    .map((c) => {
+      const on = (state.ledgerFilter ?? null) === c.id;
+      return `<button class="filter-chip filter-chip--sm${on ? ' filter-chip--active' : ''}" type="button" data-filter="${c.id ?? ''}" aria-pressed="${on}">${esc(c.label)}</button>`;
+    })
     .join('');
   // Bonus vergeben läuft über den Kontext-FAB (Ledger-Tab, Admin); kein Inline-Button.
   const adminBar = '';
@@ -683,7 +716,7 @@ async function openRedeemModal(memberId, presetItemId = null) {
     <div class="form-group">
       <label class="label" for="rw-redeem-item">${esc(t('rewards.reward'))}</label>
       <select class="input" id="rw-redeem-item">
-        ${affordable.map((c) => `<option value="${c.id}" data-cost="${c.cost}" ${c.id === presetItemId ? 'selected' : ''}>${esc(c.icon ? `${c.icon} ` : '')}${esc(c.name)} — ${esc(pointsLabel(c.cost))}</option>`).join('')}
+        ${affordable.map((c) => `<option value="${c.id}" data-cost="${c.cost}" ${c.id === presetItemId ? 'selected' : ''}>${esc(c.icon ? `${c.icon} ` : '')}${esc(c.name)} - ${esc(pointsLabel(c.cost))}</option>`).join('')}
       </select>
     </div>`;
 
@@ -1072,6 +1105,8 @@ async function refreshActiveTab() {
 export const __test = {
   renderStandingRow, renderRewardCard, renderPendingPanel, renderSetupHints,
   readOnly, state,
+  // R10 L7: Kopf und Inhalt teilen je Reiter eine Kante (test-dashboard-rewards.js).
+  syncToolbarMeasure, renderCatalog, renderLedger, renderOverview, handleSetupStep,
 };
 
 export async function render(container, { user } = {}) {

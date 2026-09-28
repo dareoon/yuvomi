@@ -16,6 +16,7 @@
  *
  * Nachträglich gemountete Panes (Detailansicht → Formular, detail-view.js)
  *   mountFooter(panel)             → hebt eine neu gerenderte Fußzeile ans Panel
+ *   decorateFooterDelete(footer)   → erkennt Löschen im Fuß (mobil Icon-Knopf)
  *   refreshDirtySnapshot()         → Dirty-Basis auf den jetzigen Stand setzen
  *   focusFirstField(panel)         → Fokus nach dem Pane-Wechsel, touch-bewusst
  *   updateHeaderAction(panel, …)   → Beschriftung/Handler des Kopf-Buttons tauschen
@@ -24,6 +25,8 @@
 import { t } from '/i18n.js';
 import { esc } from '/utils/html.js';
 import { pushOverlay, dropOverlay, isOverlayOpen } from '/utils/overlay-history.js';
+import { wireSheetDrag } from '/utils/sheet-drag.js';
+import { iconElement } from '/utils/lucide-icons.js';
 
 let activeOverlay = null;
 let previouslyFocused = null;
@@ -435,81 +438,23 @@ function onEscape(e) {
 // Swipe-to-Close (Mobile)
 // --------------------------------------------------------
 
-// Beruehrungs-Schlupf der Wischgeste, in BEIDE Richtungen derselbe: unterhalb
-// davon entscheidet sie weder "Sheet ziehen" noch "Inhalt scrollen".
-const SHEET_SWIPE_SLOP_PX = 10;
-
+// EINE Sheet-Grammatik fuer Dialog und Mehr-Blatt (utils/sheet-drag.js,
+// Re-Critique 2026-09-27): 1:1 mitgehen, schliessen ab 80px Weg ODER
+// Flick-Tempo > 0.5px/ms, sonst zurueckfedern (`--duration-lg` + `--ease-out`),
+// nach oben ein Gummiband. Richtungssperre (#981) und das Aufraeumen per rAF
+// (iOS-Click-Konvertierung) stehen dort.
+//
+// Bei ungespeicherten Aenderungen schliesst `closeModal()` nicht, sondern
+// fragt nach - dann federt die Tafel in ihre Ruhelage unter die Rueckfrage,
+// statt am alten Zug stehen zu bleiben.
 function _wireSheetSwipe(panel) {
-  let startY = 0;
-  let dragging = false;
-  // Hat dieser Finger das Sheet schon nach unten gezogen? Erst dann gehört eine
-  // Aufwärtsbewegung zum Zug; davor ist sie Scrollen des Inhalts (#981).
-  let pulled = false;
-
-  // Scroll position is now on the body, not the panel itself
-  const scrollBody = panel.querySelector('.modal-panel__body');
-
-  panel.addEventListener('touchstart', (e) => {
-    // Nur von der Handle-Zone (obere 48px) oder wenn Panel ganz oben → Swipe erlauben
-    const touchY = e.touches[0].clientY;
-    const rect = panel.getBoundingClientRect();
-    const isHandleZone = touchY - rect.top < 48;
-    const isScrolledToTop = (scrollBody ? scrollBody.scrollTop : panel.scrollTop) <= 0;
-    if (!isHandleZone && !isScrolledToTop) return;
-    startY = touchY;
-    dragging = true;
-    pulled = false;
-  }, { passive: true });
-
-  panel.addEventListener('touchmove', (e) => {
-    if (!dragging) return;
-    const dy = e.touches[0].clientY - startY;
-    if (dy < 0) {
-      // RICHTUNGSSPERRE (#981). Ein frisch geöffneter Dialog steht oben, also
-      // begann JEDE Wischgeste im Inhalt als verfolgter Zug, und der schrieb
-      // bei jedem Aufwärts-Frame `translateY(0)` ans Panel. Solange die
-      // Einfahranimation das Panel hält (`forwards`), aendert das nichts; mit
-      // "Bewegung reduzieren" gibt es keine Animation, das Inline-transform
-      // wirkt, und iOS bricht das Scrollen des Inhalts ab - gemessen im
-      // Simulator: 0 bis 30 px statt 500 bis 675 px fuer dieselbe Geste.
-      // Aufwärts, bevor das Sheet gezogen wurde, ist deshalb kein Zug: die
-      // Geste gibt ab und fasst das Panel nicht an.
-      //
-      // Aber erst jenseits derselben Schwelle, die abwärts gilt: ein Finger
-      // zittert beim Aufsetzen, und ein einzelner Pixel nach oben durfte eine
-      // gewollte Schliessgeste nicht verwerfen. Innerhalb der Schwelle
-      // passiert nichts - kein Abbruch, kein Schreibzugriff.
-      if (!pulled) {
-        if (dy < -SHEET_SWIPE_SLOP_PX) dragging = false;
-        return;
-      }
-      // Ein begonnener Zug bleibt verfolgt, wenn der Finger zurückkehrt - sonst
-      // endete touchend ohne Rücksetzen und das Panel stünde verschoben
-      // (b7c0312c). Zurückgesetzt wird einmal, nicht in jedem Frame.
-      if (panel.style.transform) panel.style.transform = '';
-      return;
-    }
-    // Erst ab der Schwelle animieren: Verhindert winzige Transforms durch
-    // normale Taps, die danach zurückgesetzt werden müssten.
-    if (dy > SHEET_SWIPE_SLOP_PX) {
-      pulled = true;
-      panel.style.transform = `translateY(${(dy - SHEET_SWIPE_SLOP_PX) * 0.6}px)`;
-    }
-  }, { passive: true });
-
-  panel.addEventListener('touchend', (e) => {
-    if (!dragging) return;
-    dragging = false;
-    const dy = e.changedTouches[0].clientY - startY;
-    if (dy > 80) {
-      panel.style.transform = '';
+  return wireSheetDrag(panel, {
+    scroller: () => panel.querySelector('.modal-panel__body') ?? panel,
+    onDismiss: () => {
+      const dirty = isFormDirty(panel);
       closeModal();
-    } else {
-      // Transform-Reset per rAF verzögern: DOM-Mutationen direkt in touchend
-      // unterbrechen auf iOS WebKit die Touch→Click-Konvertierung - der click-Event
-      // auf Child-Elementen (Buttons) wird gecancelt → Buttons reagieren nicht.
-      requestAnimationFrame(() => { panel.style.transform = ''; });
-    }
+      return !dirty;
+    },
   });
 }
 
@@ -1133,6 +1078,18 @@ function _doClose(overlayEl) {
     // Focus-Restore
     const merkzettel = previouslyFocused;
     previouslyFocused = null;
+    // HAT DER AUFRUFER SCHON FOKUSSIERT, BLEIBT ES DABEI. closeModal() loest mit
+    // dem START des Ausgangs auf (seit 2026-09-26 auch am Desktop); wer darauf
+    // wartet, neu zeichnet und ein Steuerelement fokussiert, verloere es sonst
+    // ~150 ms spaeter an den alten Ausloeser. Im Dialog selbst kann der Fokus
+    // hier nicht mehr stehen - das Overlay ist schon entfernt, der Browser hat
+    // ihn auf <body> fallen lassen.
+    const aktiv = document.activeElement;
+    if (aktiv && aktiv !== document.body && aktiv !== document.documentElement && !target.contains?.(aktiv)) {
+      if (window.yuvomi?.restoreThemeColor) window.yuvomi.restoreThemeColor();
+      _releaseCloseWaiters(target);
+      return;
+    }
     const restoreTarget = focusRestoreTarget(merkzettel);
     // Das TATSAECHLICH fokussierte Element merken, nicht das gewuenschte: nimmt
     // der Ersatz den Fokus nicht an, steht danach die Wurzel dort, und die
@@ -1203,7 +1160,104 @@ export function mountFooter(panel) {
     .forEach((el) => el.remove());
 
   panel.appendChild(bodyFooter);
+  decorateFooterDelete(bodyFooter);
   return bodyFooter;
+}
+
+/**
+ * Woran der Fuß sein Löschen erkennt. Die Module schreiben es seit Jahren als
+ * `.btn--danger-outline` (einige als `.btn--danger-ghost`) - die Klasse IST
+ * die Auszeichnung, kein Modul muss etwas nachtragen. `data-footer-delete`
+ * nimmt einen Knopf auf, der anders aussieht; `data-footer-delete="off"` nimmt
+ * einen heraus, bei dem Löschen die Primäraktion des Dialogs ist.
+ */
+export const FOOTER_DELETE_SELECTOR = '.btn--danger-outline, .btn--danger-ghost, [data-footer-delete]';
+
+/**
+ * Der Name des Objekts, das der Knopf löscht: ausdrücklich gesetzt
+ * (`data-delete-name`), sonst das erste Textfeld des Formulars - dort steht bei
+ * jedem Objekt sein Titel -, und in der Detailansicht der Dialogtitel, denn
+ * dort IST er der Objektname (detail-view.js).
+ */
+function footerDeleteObjectName(btn) {
+  const own = btn.dataset?.deleteName?.trim();
+  if (own) return own;
+  const panel = btn.closest?.('.modal-panel');
+  const scope = btn.form ?? panel?.querySelector('.modal-panel__body');
+  const field = scope?.querySelector?.('input[type="text"], input:not([type])');
+  const typed = field?.value?.trim();
+  if (typed) return typed;
+  if (btn.closest?.('.detail-view__footer')) return panel?.querySelector('.modal-panel__title')?.textContent?.trim() || '';
+  return '';
+}
+
+/**
+ * DER DIALOGFUSS MIT LÖSCHEN PASST MOBIL IN EINE ZEILE (Re-Critique
+ * 2026-09-27, R9 M8).
+ *
+ * WAS GEMESSEN WAR: Löschen · Abbrechen · Speichern brauchen bei 390px rund
+ * 345px, der Fuß hat 332. Der Umbruch aus #872 hielt alles im Bild, stellte
+ * aber „Speichern" allein in eine zweite Zeile - die Primäraktion stand unter
+ * der Nebenaktion, in jedem Dialog mit Löschen (Kalender, Medikament,
+ * Mahlzeit ...).
+ *
+ * DIE ANTWORT IST APPLES: Löschen wird auf dem Telefon ein 44px-Papierkorb links,
+ * Abbrechen und Primär bleiben rechts beschriftet. Einmal hier statt je Modul -
+ * deshalb erkennt die Shell den Knopf an seiner Klasse, packt seinen Text in
+ * eine eigene Spanne (die das CSS mobil ausblendet, ohne sie dem Screenreader
+ * zu nehmen), ergänzt ein fehlendes Papierkorb-Symbol und gibt ihm den
+ * Objektnamen: „Einkauf löschen" statt eines nackten „Löschen", sobald das
+ * Wort selbst nicht mehr dasteht. Ein vorhandenes `aria-label` gewinnt immer.
+ *
+ * Idempotent: ein zweiter Umzug derselben Fußzeile (Pane-Wechsel) ändert nichts.
+ *
+ * @param {HTMLElement|null} footer
+ * @returns {HTMLElement[]} die erkannten Löschen-Knöpfe
+ */
+export function decorateFooterDelete(footer) {
+  if (!footer?.querySelectorAll) return [];
+  const found = [...footer.querySelectorAll(FOOTER_DELETE_SELECTOR)]
+    .filter((btn) => btn.tagName === 'BUTTON' && btn.dataset?.footerDelete !== 'off');
+  footer.classList.toggle('modal-panel__footer--has-delete', found.length > 0);
+  // EINE ZEILE NUR FÜR DIE KANONISCHE DREIHEIT (Löschen · Abbrechen · Primär).
+  // Die Detailansicht trägt neben Löschen drei beschriftete Aktionen
+  // (Erledigen, Starten, Aufgabe archivieren) - in eine Zeile gezwungen,
+  // quetschten sie sich auf je ~80px. Dort bleibt der Umbruch aus #872, der
+  // Papierkorb spart trotzdem eine Knopfbreite. Icon-Knöpfe (Archivieren im
+  // Kontodialog) zählen nicht mit: sie brauchen nur ihre 44px.
+  const labelled = [...footer.querySelectorAll('button')]
+    .filter((b) => !found.includes(b) && !b.classList.contains('btn--icon'));
+  footer.classList.toggle('modal-panel__footer--one-row', found.length > 0 && labelled.length <= 2);
+  for (const btn of found) {
+    if (btn.classList.contains('modal-panel__delete')) continue;
+    btn.classList.add('modal-panel__delete');
+    // DIE DETAILANSICHT TRAEGT IHR WORT SCHON IN EINER SPANNE (`.btn__label`,
+    // components/detail-view.js), nicht als losen Text. Die blieb sichtbar und
+    // ragte mobil aus dem 48px-Quadrat (Re-Critique 2026-09-28, A5 P2-4) - sie
+    // wird deshalb selbst die Wortspanne, statt eine zweite zu bekommen.
+    const ownLabel = [...btn.childNodes].find((n) => n.nodeType === 1 && n.classList?.contains('btn__label'));
+    if (ownLabel) ownLabel.classList.add('modal-panel__delete-label');
+    const loose = [...btn.childNodes].filter((n) => n.nodeType === 3 && n.textContent.trim());
+    if (loose.length && ownLabel) {
+      ownLabel.textContent = [ownLabel.textContent.trim(), ...loose.map((n) => n.textContent.trim())].join(' ');
+      loose.forEach((n) => n.remove());
+    } else if (loose.length) {
+      const label = document.createElement('span');
+      label.className = 'modal-panel__delete-label';
+      label.textContent = loose.map((n) => n.textContent.trim()).join(' ');
+      loose.forEach((n) => n.remove());
+      btn.appendChild(label);
+    }
+    if (!btn.querySelector('svg, [data-lucide]')) {
+      const icon = iconElement('trash-2', { class: 'icon-md' });
+      if (icon) btn.prepend(icon);
+    }
+    if (!btn.hasAttribute('aria-label')) {
+      const name = footerDeleteObjectName(btn);
+      if (name) btn.setAttribute('aria-label', t('common.deleteNamed', { name }));
+    }
+  }
+  return found;
 }
 
 // --------------------------------------------------------
@@ -1576,24 +1630,47 @@ export async function closeModal({ force = false } = {}) {
     panel.removeEventListener('focusin', panel._onInputFocus);
   }
 
-  // Animation handling
-  const isMobile = window.innerWidth < 768;
-  if (isMobile && panel) {
+  // Ausgang: Tafel und Overlay auf JEDER Breite (Critique 2026-09-26, P1-1).
+  // Bis dahin gab es ihn nur mobil, und auch dort lief er nie - glass.css
+  // schlug die Schliess-Regel, `animationend` kam nicht, und dieser Timer
+  // raeumte nach 400ms eine Tafel ab, die die ganze Zeit reglos stand. Die
+  // Kaskade haelt jetzt test-motion.js; der Timer bleibt als Sicherheitsnetz
+  // fuer den Fall, dass das Ende doch ausbleibt (verdeckter Tab, abgehaengter
+  // Knoten).
+  //
+  // Unter reduzierter Bewegung gibt es keinen Ausgang, also auch kein Warten:
+  // die Regeln setzen die Animation dort auf `none`, und ein `animationend`
+  // kaeme nie.
+  const reduceMotion = typeof matchMedia === 'function'
+    && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (panel && !reduceMotion) {
     panel.classList.add('modal-panel--closing');
+    capturedOverlay.classList.add('modal-overlay--closing');
     // _doClose setzt modalState auf 'idle', sobald der Overlay final entfernt wird.
     const fallback = setTimeout(() => {
+      panel.removeEventListener('animationend', onExitEnd);
       _doClose(capturedOverlay);
-    }, 400); // Slightly longer fallback
-    panel.addEventListener('animationend', () => {
+    }, MODAL_EXIT_FALLBACK_MS);
+    // NUR das Ende der eigenen Ausgangs-Animation. `animationend` blubbert: ein
+    // Kind, das gerade fertig wird (Haken-Pop, Fehler-Wackeln), raeumte die
+    // Tafel sonst mitten im Ausgang ab.
+    function onExitEnd(event) {
+      if (event.target !== panel) return;
+      panel.removeEventListener('animationend', onExitEnd);
       clearTimeout(fallback);
       _doClose(capturedOverlay);
-    }, { once: true });
+    }
+    panel.addEventListener('animationend', onExitEnd);
     return true;
   }
 
   _doClose(capturedOverlay);
   return true;
 }
+
+/* Laenger als der laengste Ausgang (mobil `--duration-md` = 200ms), damit das
+ * Netz nur greift, wenn das Ende wirklich ausbleibt. */
+const MODAL_EXIT_FALLBACK_MS = 400;
 
 // --------------------------------------------------------
 // promptModal
@@ -1621,7 +1698,7 @@ export function promptModal(label, defaultValue = '') {
             <input class="form-input" id="prompt-modal-input" type="text"
                    value="${esc(defaultValue)}" autocomplete="off">
           </div>
-          <div class="modal-actions">
+          <div class="modal-panel__footer">
             <button type="button" class="btn btn--secondary" id="prompt-modal-cancel">${t('common.cancel')}</button>
             <button type="submit" class="btn btn--primary" id="prompt-modal-ok">${t('common.save')}</button>
           </div>
@@ -1677,7 +1754,7 @@ export function selectModal(label, options) {
             <label class="sr-only" for="select-modal-input">${esc(label)}</label>
             <select class="form-input" id="select-modal-input">${optionsHtml}</select>
           </div>
-          <div class="modal-actions">
+          <div class="modal-panel__footer">
             <button type="button" class="btn btn--secondary" id="select-modal-cancel">${t('common.cancel')}</button>
             <button type="submit" class="btn btn--primary" id="select-modal-ok">${t('common.save')}</button>
           </div>
@@ -1732,7 +1809,7 @@ export function confirmModal(message, { confirmLabel, cancelLabel, danger = fals
       size: 'sm',
       content: `
         ${detail ? `<p class="modal-confirm__detail">${esc(detail)}</p>` : ''}
-        <div class="modal-actions">
+        <div class="modal-panel__footer">
           <button type="button" class="btn btn--secondary" id="confirm-modal-cancel">${cancelLabel ?? t('common.cancel')}</button>
           <button type="button" class="btn ${danger ? 'btn--danger' : 'btn--primary'}" id="confirm-modal-ok">
             ${confirmLabel ?? t('common.confirm')}
@@ -2083,13 +2160,20 @@ export function btnError(btn) {
  * @param {Object} [opts]
  * @param {string} [opts.label]     - Aufklapper-Beschriftung (Default: t('modal.moreSettings'))
  * @param {boolean} [opts.open=false] - Initial geöffnet (z. B. wenn Sekundärfelder bereits befüllt sind)
+ * @param {string} [opts.hint]      - Zweite Zeile unter der Beschriftung: was hinter dem
+ *   Aufklapper liegt (Klartext, wird escaped). Ohne sie findet ein Feld dort nur, wer
+ *   schon weiss, dass es existiert.
  * @returns {string} HTML-String
  */
-export function advancedSection(innerHtml, { label, open = false } = {}) {
+export function advancedSection(innerHtml, { label, open = false, hint = '' } = {}) {
+  const text = esc(label ?? t('modal.moreSettings'));
+  const labelHtml = hint
+    ? `<span class="form-advanced__label"><span>${text}</span><span class="form-advanced__hint">${esc(hint)}</span></span>`
+    : `<span>${text}</span>`;
   return `
     <details class="form-advanced"${open ? ' open' : ''}>
       <summary class="form-advanced__summary">
-        <span>${esc(label ?? t('modal.moreSettings'))}</span>
+        ${labelHtml}
         <i data-lucide="chevron-down" class="form-advanced__chevron" aria-hidden="true"></i>
       </summary>
       <div class="form-advanced__body">

@@ -5,8 +5,9 @@
  */
 
 import { api } from '/api.js';
-import { stagger, vibrate, scheduleUndoableDelete } from '/utils/ux.js';
+import { stagger, vibrate, scheduleUndoableDelete, collapseOut, expandIn } from '/utils/ux.js';
 import { wireSwipeRows, maybeShowSwipeHint } from '/utils/swipe-row.js';
+import { flipSnapshot, flipPlay } from '/utils/flip.js';
 import { t } from '/i18n.js';
 import { esc } from '/utils/html.js';
 import { promptModal, openModal, closeModal, confirmModal, reportFieldError, refocusAfterRender } from '/components/modal.js';
@@ -16,7 +17,7 @@ import { renderKitchenTabsBar, refreshKitchenBadges } from '/utils/kitchen-tabs.
 import { mayImportMealPlan, mayTransferShoppingToPantry } from '/utils/kitchen-transfer.js';
 import { mayWritePath } from '/utils/module-access.js';
 import { mountEmptyState, mountLoadError } from '/utils/empty-state.js';
-import { popoverMenuHtml, installPopoverMenus } from '/utils/popover-menu.js';
+import { pageToolsMenuHtml, installPopoverMenus } from '/utils/popover-menu.js';
 import '/components/category-manager.js';
 import { findPageFab } from '/utils/fab.js';
 import { setBulkPill, clearBulkPill, bulkPillLayer } from '/utils/bulk-pill.js';
@@ -160,7 +161,7 @@ function pruneCollapsedCategories(groups) {
 /** Klappt eine Kategorie in-place um (kein Listen-Rerender, siehe renderItems). */
 function toggleCategoryCollapse(button) {
   const key = button.dataset.categoryToggle;
-  const rowsEl = button.closest('.list-group')?.querySelector('.list-rows');
+  const rowsEl = button.closest('.list-group')?.querySelector('.row-carrier');
   const chevron = button.querySelector('.list-group__chevron');
   const nowCollapsed = !state.collapsedCategories.has(key);
 
@@ -169,7 +170,26 @@ function toggleCategoryCollapse(button) {
 
   button.setAttribute('aria-expanded', String(!nowCollapsed));
   chevron?.classList.toggle('list-group__chevron--collapsed', nowCollapsed);
-  if (rowsEl) rowsEl.hidden = nowCollapsed;
+  // Die Zeilen klappen, statt zu springen (Critique 2026-09-26, A3 P1-4), wie
+  // in den Aufgaben. `hidden` faellt erst NACH dem Einklappen - vorher gaebe es
+  // nichts mehr zu bewegen. Ein Gegenklick waehrend der Bewegung bricht sie ab
+  // und zieht von der aktuellen Stelle wieder auf; das spaete `then` sieht am
+  // Zustand, dass es nicht mehr gemeint ist.
+  if (rowsEl) {
+    rowsEl.getAnimations?.().forEach((anim) => anim.cancel());
+    rowsEl.style.overflow = '';
+    if (nowCollapsed) {
+      collapseOut(rowsEl).then(() => {
+        if (!state.collapsedCategories.has(key)) return;
+        rowsEl.hidden = true;
+        rowsEl.getAnimations?.().forEach((anim) => anim.cancel());
+        rowsEl.style.overflow = '';
+      });
+    } else {
+      rowsEl.hidden = false;
+      expandIn(rowsEl);
+    }
+  }
 
   saveCollapsedCategories(state.currentUserId, state.activeListId, state.collapsedCategories);
 }
@@ -734,9 +754,16 @@ function renderTabs(container) {
     // Der Zähler ist aria-hidden, sonst klebt er am Buttonnamen („Einkauf23");
     // die Ansage steht als aria-label auf dem Tab selbst - dasselbe Muster wie
     // setSubTabBadge. „0 offene Artikel" deckt auch den ✓-Zustand ehrlich ab.
+    //
+    // DIE WAHL WIRD ANGESAGT, NICHT NUR GEFAERBT (R8 H11): bis dahin trug nur
+    // `list-tab--active` den Zustand, und ein Screenreader las fuenf gleiche
+    // Knoepfe. Die Leiste ist `role="group"` (sie haelt auch „Neue Liste"),
+    // kein Tablist - `aria-selected` waere dort ungueltig, `aria-current`
+    // sagt genau „das ist die gezeigte Liste".
+    const active = list.id === state.activeListId;
     return `
-      <button class="list-tab ${list.id === state.activeListId ? 'list-tab--active' : ''}"
-              data-action="switch-list" data-id="${list.id}"
+      <button type="button" class="list-tab ${active ? 'list-tab--active' : ''}"
+              data-action="switch-list" data-id="${list.id}"${active ? ' aria-current="true"' : ''}
               ${list.item_total > 0 ? `aria-label="${esc(list.name)}, ${esc(t('nav.shoppingOpen', { count: unchecked }))}"` : ''}>
         ${esc(list.name)}
         ${list.item_total > 0 ? `<span class="list-tab__count" aria-hidden="true">${unchecked > 0 ? unchecked : '✓'}</span>` : ''}
@@ -763,8 +790,7 @@ function renderTabs(container) {
   // ein Ausloeser ohne Eintraege waere ein Knopf, der nichts oeffnet.
   const ro = readOnly();
   const actionsHtml = state.activeList && !ro ? `
-    <div class="list-tabs-bar__actions">
-      ${popoverMenuHtml({
+      ${pageToolsMenuHtml({
         id: 'list-actions-menu',
         // Der Name muss die Liste nennen: der Trigger steht nicht mehr neben
         // einer Überschrift, die den Bezug herstellt. „Mehr" allein ließe offen,
@@ -784,18 +810,28 @@ function renderTabs(container) {
           { action: 'manage-stores', label: t('shopping.manageStores'), icon: 'store' },
           { action: 'delete-list', label: t('shopping.deleteListLabel'), icon: 'trash', id: state.activeList.id, danger: true },
         ],
-      })}
-    </div>` : '';
+      })}` : '';
 
   bar.insertAdjacentHTML('beforeend', `
-    <i data-lucide="list" class="list-tabs-bar__marker" aria-hidden="true"></i>
     ${tabsHtml}
     ${ro ? '' : `<button class="list-tab__new" data-action="new-list" aria-label="${t('shopping.newListButton')}">
       <i data-lucide="plus" class="icon-md" aria-hidden="true"></i>
     </button>`}
-    ${actionsHtml}
   `);
   if (window.lucide) window.lucide.createIcons({ el: bar });
+
+  // KUECHENKOPF (Kopfregel mobil, 2026-09-26): das Menue der gewaehlten Liste
+  // ist das EINE Werkzeugmenue des Kopfs und steht im __actions-Slot - wie im
+  // Essensplan und im Vorrat -, nicht mehr klebend am Ende der Chip-Leiste.
+  // Eigener Traeger im Slot, weil der Router am Desktop den Primaerknopf in
+  // denselben Slot dockt: ein replaceChildren() am Slot warfe ihn hinaus
+  // (dieselbe Lehre wie #recipes-source-filter, test:hidden-cascade).
+  const tools = container.querySelector('#shopping-tools');
+  if (tools) {
+    tools.replaceChildren();
+    tools.insertAdjacentHTML('beforeend', actionsHtml);
+    if (window.lucide) window.lucide.createIcons({ el: tools });
+  }
 }
 
 /**
@@ -876,10 +912,11 @@ async function openSendListDialog(container) {
         try {
           await api.post(`/shopping/${listId}/send`, { userId });
           closeModal({ force: true });
-          // BEWUSST KEIN success-Toast. Die Erfolgsmeldungen der App sind nach
-          // 50 Bestaetigungen dauerhaft stummgeschaltet (`TOAST_SUCCESS_MAX` in
-          // router.js) - richtig fuer Handlungen, deren Ergebnis auf dem
-          // Bildschirm steht und die man taeglich wiederholt. Ein Mailversand
+          // BEWUSST KEIN success-Toast. Die Erfolgsmeldungen der App zeigen
+          // nach 50 Bestaetigungen keine Flaeche mehr (`TOAST_SUCCESS_MAX` in
+          // utils/toast-show.js; angesagt werden sie weiter) - richtig fuer
+          // Handlungen, deren Ergebnis auf dem Bildschirm steht und die man
+          // taeglich wiederholt. Ein Mailversand
           // ist das Gegenteil: er passiert selten, laesst sich nicht
           // zuruecknehmen, und sein Ergebnis liegt in einem fremden Postfach.
           // Wer hier nichts sieht, weiss nicht, ob die Liste unterwegs ist.
@@ -1049,8 +1086,10 @@ function renderListContent(container) {
         <select class="quick-add__cat" id="item-cat-select" aria-label="${t('shopping.categoryLabel')}">
           ${state.categories.map((c) => `<option value="${esc(c.name)}" ${c.name === DEFAULT_CATEGORY_NAME ? 'selected' : ''}>${esc(categoryLabel(c.name))}</option>`).join('')}
         </select>
+        <!-- Return-Glyphe statt eines zweiten "+" (Re-Critique 2026-09-28,
+             A4 P2-4): das Plus gehoert der Kopf-Pille bzw. dem FAB. -->
         <button class="quick-add__btn" type="submit" aria-label="${t('shopping.addItemLabel')}">
-          <i data-lucide="plus" class="icon-lg" aria-hidden="true"></i>
+          <i data-lucide="corner-down-left" class="icon-lg" aria-hidden="true"></i>
         </button>
       </form>
     </div>`}
@@ -1140,20 +1179,24 @@ function mountItems(listEl, container) {
   }
 
   listEl.replaceChildren();
-  listEl.insertAdjacentHTML('beforeend', renderItems());
+  // EINE HUELLE UM DIE GRUPPEN (R11 H5): sie ist die Flaeche, die am Desktop
+  // in zwei Spalten packt (shopping.css, `.items-lanes`). Der Scroller selbst
+  // kann das nicht - mit begrenzter Hoehe liefe Multicol seitlich ueber.
+  // Mobil ist sie `display: contents` und aendert nichts.
+  listEl.insertAdjacentHTML('beforeend', `<div class="items-lanes">${renderItems()}</div>`);
 }
 
 function renderItems() {
   const groups = groupItemsByCategory(state.items);
   pruneCollapsedCategories(groups);
   // Geteilte Gruppen-Grammatik (styles/list-row.css): .list-group ordnet,
-  // .list-rows trägt die weiße Fläche und die Trennlinien. Die Zeilen selbst
+  // .row-carrier trägt die Fläche und die Trennlinien. Die Zeilen selbst
   // sind flächenlos - vorher war Einkaufen eine Trennlinien-Liste und der Vorrat
   // eine Kartenliste, dieselbe Sache in zwei Paradigmen (Critique 2026-07-30).
   //
   // Gruppenkopf als echter Knopf im h2 (#1039, Muster aus tasks.js/#812): nur
   // ein <button> kennt die Tastatur und traegt aria-expanded ueberhaupt. Die
-  // Zeilen (.list-rows) bleiben bei [hidden] im DOM - ein Rerender wuerde
+  // Zeilen (.row-carrier) bleiben bei [hidden] im DOM - ein Rerender wuerde
   // Sortable-Instanzen und Swipe-Closures verwerfen, nur um eine Gruppe
   // zuzuklappen.
   return groups.map(([cat, items], idx) => {
@@ -1172,7 +1215,7 @@ function renderItems() {
         </button>
         <span class="list-group__count">${items.length}</span>
       </h2>
-      <div class="list-rows" id="${rowsId}" ${collapsed ? 'hidden' : ''}>
+      <div class="row-carrier" id="${rowsId}" ${collapsed ? 'hidden' : ''}>
         ${items.map(renderItem).join('')}
       </div>
     </div>`;
@@ -1671,7 +1714,7 @@ const orderRuns = new Map();
  * in der alten Liste, und dorthin gehört er auch gesichert.
  */
 async function sendItemOrder(groupEl, container, listId) {
-  const rowsEl   = groupEl.querySelector('.list-rows');
+  const rowsEl   = groupEl.querySelector('.row-carrier');
   const category = groupEl.dataset.category;
   if (!rowsEl) return true;
 
@@ -1725,7 +1768,7 @@ function persistItemOrder(groupEl, container, movedRow) {
   const category = groupEl?.dataset.category;
   if (!groupEl || !category) return;
 
-  refreshHandleLabels(groupEl.querySelector('.list-rows'));
+  refreshHandleLabels(groupEl.querySelector('.row-carrier'));
   announceItemMove(container, movedRow);
 
   const running = orderRuns.get(category);
@@ -1780,7 +1823,7 @@ function wireItemReorder(container) {
   destroyItemSortables();
 
   listEl.querySelectorAll('.list-group').forEach((groupEl) => {
-    const rowsEl = groupEl.querySelector('.list-rows');
+    const rowsEl = groupEl.querySelector('.row-carrier');
     if (!rowsEl) return;
     refreshHandleLabels(rowsEl);
 
@@ -1886,7 +1929,7 @@ function updateItemRow(container, item) {
 
   // Der Sortiergriff hängt am Erledigt-Zustand (#678): abgehaktes sortiert sich
   // nicht, und die Positionsangaben der Gruppe verschieben sich mit.
-  refreshHandleLabels(row.closest('.list-rows'));
+  refreshHandleLabels(row.closest('.row-carrier'));
 
   // Swipe-Affordance (links) spiegelt den neuen Status
   const reveal = row.querySelector('.swipe-reveal--done');
@@ -2121,7 +2164,13 @@ function openItemDetails(itemId, container) {
           <textarea class="form-input" id="item-details-notes" rows="4"
                     placeholder="${t('shopping.notesPlaceholder')}">${esc(item.notes || '')}</textarea>
         </div>
-        <div class="modal-actions">
+        ${/* LOESCHEN OHNE WISCHGESTE (A4 P1-1, WCAG 2.5.1). Am Touchgeraet
+            * blendet shopping.css den Papierkorb der Zeile aus; einziger Weg
+            * war das Wischen, das VoiceOver abfaengt. Jetzt links im Fuss wie
+            * bei Mahlzeit und Rezept, und derselbe Weg wie Wisch und Knopf
+            * (`deleteItemUndoable`: sofort weg, fuenf Sekunden Rueckgaengig). */ ''}
+        <div class="modal-panel__footer modal-panel__footer--plain">
+          <button type="button" class="btn btn--danger-outline" id="item-details-delete" data-delete-name="${esc(item.name)}" style="margin-inline-end:auto"><i data-lucide="trash-2" class="icon-md" aria-hidden="true"></i>${esc(t('common.delete'))}</button>
           <button type="button" class="btn btn--secondary" id="item-details-cancel">${t('common.cancel')}</button>
           <button type="submit" class="btn btn--primary">${t('common.save')}</button>
         </div>
@@ -2136,6 +2185,14 @@ function openItemDetails(itemId, container) {
       const preview = panel.querySelector('#item-details-link');
 
       panel.querySelector('#item-details-cancel')?.addEventListener('click', () => closeModal());
+      panel.querySelector('#item-details-delete')?.addEventListener('click', () => {
+        // Der Dialog kann vor einem Rechtewechsel aufgegangen sein.
+        if (readOnly()) return;
+        // force: getippte, ungespeicherte Aenderungen gehen mit dem Artikel -
+        // eine Rueckfrage "Verwerfen?" vor dem Loeschen fragte das Falsche.
+        closeModal({ force: true });
+        deleteItemUndoable(item.id, container);
+      });
 
       urlEl?.addEventListener('input', () => {
         preview.replaceChildren();
@@ -2237,11 +2294,17 @@ function openItemDetails(itemId, container) {
 function updateItemsList(container) {
   const listEl = container.querySelector('#items-list');
   if (listEl) {
+    // FLIP (Re-Critique 2026-09-28, A4 P2-8): ein abgehakter Artikel sprang
+    // beim Neubau ans Gruppenende. Die Lage wird VOR dem Neubau gemessen und
+    // jede bewegte Zeile gleitet danach von dort an ihre neue Stelle
+    // (utils/flip.js; reduzierte Bewegung springt wie bisher).
+    const before = flipSnapshot(listEl, '.swipe-row[data-swipe-id]', 'data-swipe-id');
     // mountItems() verdrahtet den CTA des Leerzustands selbst; der frühere
     // nachgelagerte #empty-cta-shopping-Listener entfällt damit.
     mountItems(listEl, container);
+    flipPlay(listEl, '.swipe-row[data-swipe-id]', 'data-swipe-id', before);
     if (window.lucide) window.lucide.createIcons({ el: listEl });
-    stagger(listEl.querySelectorAll('.shopping-item'));
+    stagger(listEl.querySelectorAll('.shopping-item'), { host: listEl });
     // Regel 3 in utils/module-access.js: Wischen und Ziehen haben kein Markup,
     // das man wegnehmen koennte - bei `read` bleibt die VERDRAHTUNG aus. Ein
     // Riegel im Ende-Handler kaeme zu spaet, die Zeile waere schon weggewischt.
@@ -2651,7 +2714,7 @@ function openMealPlanImport(container) {
           <yuvomi-datepicker type="date" id="shopping-import-to" value="${esc(defaultTo)}"></yuvomi-datepicker>
         </div>
         <p class="form-hint" id="shopping-import-preview" role="status" aria-live="polite"></p>
-        <div class="modal-actions">
+        <div class="modal-panel__footer modal-panel__footer--plain">
           <button type="button" class="btn btn--secondary" id="shopping-import-cancel">${t('common.cancel')}</button>
           <!-- Startet deaktiviert und wird von updatePreview() freigeschaltet, sobald
                der Zeitraum Zutaten enthaelt. Die Schwesteraktion „Plan zufaellig
@@ -3516,6 +3579,12 @@ export async function render(container, { user, signal: routeSignal = null } = {
       </div>
     </div>
   `);
+  // Die Kuechen-Leiste gehoert in den SYNCHRONEN Teil des Aufbaus: das neue
+  // Bild der View Transition wird direkt nach ihm aufgenommen (router.js,
+  // swap). Kam sie erst nach den Daten, fehlte sie dort - die Leiste blendete
+  // beim Wechsel Mahlzeiten -> Einkauf aus und sprang nach dem Laden zurueck,
+  // statt zu stehen wie in den drei Geschwister-Tabs (Integration Runde 3).
+  const kitchenBar = renderKitchenTabsBar(container, '/shopping');
   state.itemsError = null;
   try {
     // loadCategories() und loadLists() fangen selbst; der äußere catch ist das
@@ -3541,7 +3610,9 @@ export async function render(container, { user, signal: routeSignal = null } = {
     state.listsError = err;
   }
 
-  container.replaceChildren();
+  // Alles ausser der Leiste abraeumen: sie bleibt eingehaengt, damit ihre
+  // Kapsel weitergleitet und der waagrechte Scrollstand nicht zurueckspringt.
+  [...container.children].forEach((child) => { if (child !== kitchenBar) child.remove(); });
   container.insertAdjacentHTML('beforeend', `
     <div class="shopping-page page-measure--narrow">
       <h1 class="sr-only">${t('nav.shopping')}</h1>
@@ -3555,7 +3626,21 @@ export async function render(container, { user, signal: routeSignal = null } = {
            KEINE BACKTICKS IN DIESEM KOMMENTAR: er steht INNERHALB des
            Template-Literals, ein Backtick-Paar schliesst es und macht aus dem
            Rest ein Tagged Template ("TypeError: toolbar is not a function"). -->
-      <div class="list-tabs-bar" id="list-tabs-bar"></div>
+      <!-- Seit der Kopfregel mobil (2026-09-26) wieder ein page-toolbar-Kopf,
+           aber OHNE Titel: Zeile 2 des Kuechenkopfs. Kontext sind die
+           Listen-Kapseln (sie nennen die Liste), am Ende das Werkzeugmenue
+           der Liste; am Desktop dockt der Router davor den Primaerknopf an,
+           wie in den drei Geschwister-Tabs. Kein --narrow (Re-Critique
+           2026-09-27, D3): der Kopf endet an der Kuechen-Leiste, damit die
+           Primaeraktion in allen vier Tabs an derselben Stelle steht. -->
+      <div class="page-toolbar page-toolbar--in-group shopping-toolbar">
+        <div class="page-toolbar__center">
+          <div class="list-tabs-bar" id="list-tabs-bar" role="group" aria-label="${t('shopping.listsLabel')}"></div>
+        </div>
+        <div class="page-toolbar__actions">
+          <div class="shopping-tools" id="shopping-tools"></div>
+        </div>
+      </div>
       <div id="list-content" style="flex:1;display:flex;flex-direction:column;overflow:hidden"></div>
       ${readOnly() ? '' : `<button class="page-fab" id="fab-new-item" aria-label="${t('shopping.addItemLabel')}" data-dock-label="${t('newLabel.shopping')}">
         <i data-lucide="plus" class="icon-xl" aria-hidden="true"></i>
@@ -3563,7 +3648,6 @@ export async function render(container, { user, signal: routeSignal = null } = {
     </div>
   `);
 
-  renderKitchenTabsBar(container, '/shopping');
   renderTabs(container);
   wireTabBar(container);
   renderListContent(container);
@@ -3604,7 +3688,7 @@ export async function render(container, { user, signal: routeSignal = null } = {
       // Steht der Treffer in einer eingeklappten Kategorie, bleibt er bei
       // [hidden] unsichtbar, obwohl der Selektor ihn findet - ein globaler
       // Suchtreffer darf nie hinter persistiertem Zustand verschwinden.
-      const rowsEl = el.closest('.list-rows');
+      const rowsEl = el.closest('.row-carrier');
       if (rowsEl?.hidden) {
         const toggleBtn = rowsEl.closest('.list-group')?.querySelector('[data-category-toggle]');
         if (toggleBtn) toggleCategoryCollapse(toggleBtn);

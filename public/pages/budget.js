@@ -11,28 +11,33 @@ import { renderDocumentAttachField, bindDocumentAttachField, attachmentLinksNode
 import { openDetailView } from '/components/detail-view.js';
 import { stagger, vibrate, scheduleUndoableDelete } from '/utils/ux.js';
 import { wireTablist } from '/utils/tablist.js';
+import { attachSegmentIndicator } from '/utils/segment-indicator.js';
 import { t, formatDate, formatDayMonth, getLocale, getNumberFormat } from '/i18n.js';
 import { esc } from '/utils/html.js';
 import { renderSkeletonList } from '/utils/skeleton.js';
-import { render as renderSplitExpenses, prefillSplitExpense } from '/pages/split-expenses.js';
+import { render as renderSplitExpenses, prefillSplitExpense, canAddSplitExpense, openNewSplitExpense } from '/pages/split-expenses.js';
 import { openSubscriptionModal, render as renderSubscriptions } from '/pages/subscriptions.js';
 import { renderStats } from '/pages/budget-stats.js';
-import { renderPlans } from '/pages/budget-plans.js';
+import { renderPlans, openAddPlan } from '/pages/budget-plans.js';
 import { toLocalDateKey, parseLocalDateKey, addLocalDays,
          monthPeriodKeys, defaultDateInPeriod,
         todayKey} from '/utils/date.js';
 import { formatMoney, formatSignedAmount, amountPlaceholder, amountStep, amountMin, applyAmountFormat, amountIsSavable, smallestUnitLabel } from '/utils/money.js';
 import { budgetCategoryLabel } from '/utils/category-labels.js';
 import { trendMarkup } from '/utils/metric-card.js';
+import { installPopoverMenus } from '/utils/popover-menu.js';
+import { rowActionHtml } from '/utils/row-action.js';
+import { metricGlanceHtml, wireMetricGlance } from '/utils/metric-glance.js';
 import { intervalUnitLabel } from '/rrule-ui.js';
 import { appendCurrencyOptions } from '/settings/currency.js';
 import '/components/category-manager.js';
-import { findPageFab } from '/utils/fab.js';
+import { findPageFab, setPageFabAction } from '/utils/fab.js';
 import { emptyStateHTML, mountLoadError } from '/utils/empty-state.js';
 import { attachOverlay } from '/utils/overlay-history.js';
 import { renderUserMultiSelect, getSelectedUserIds, bindUserMultiSelect, renderAvatarStack } from '/components/user-multi-select.js';
 import { withChosenPeople } from '/utils/people-picker.js';
 import { isNavModuleReadOnly } from '/permissions.js';
+import { renderPageSearch, wirePageSearch } from '/utils/page-search.js';
 
 // --------------------------------------------------------
 // Konstanten
@@ -131,13 +136,31 @@ function getSubcategories(category) {
   return state.meta.subcategories?.[category] || [];
 }
 
-function defaultSubcategory(category) {
-  return getSubcategories(category)[0]?.key || '';
+/* DIE UNTERKATEGORIE WIRD GEWAEHLT, NICHT GESETZT (Re-Critique 2026-09-27,
+ * R8 H4-Rest). Nach Wahl von "Essen" stand sie still auf ihrem ersten Eintrag -
+ * dieselbe Klasse wie die vorbelegte Kategorie: wer sie nicht ansieht, bucht
+ * sie. Bei mehreren steht ein Platzhalter und die Wahl ist Pflicht; bei genau
+ * einer gibt es nichts zu entscheiden, sie steht vorgewaehlt; ohne keine gibt
+ * es auch keine Pflicht (der Server laesst sie dann leer). Ein Bestandswert,
+ * der zur Kategorie gehoert, bleibt stehen. Markup und Kategoriewahl im
+ * offenen Dialog lesen beide diese eine Regel. */
+function subcategoryChoice(category, selected = '') {
+  const subs = getSubcategories(category);
+  const several = subs.length > 1;
+  const value = subs.some((s) => s.key === selected) ? selected : (subs.length === 1 ? subs[0].key : '');
+  return { value, required: several, placeholder: several };
 }
 
-function defaultCategory(type) {
-  const cats = type === 'income' ? incomeCategories() : expenseCategories();
-  return cats[0]?.key || '';
+function subcategoryPlaceholderOption(selected) {
+  return `<option value="" disabled${selected ? ' selected' : ''}>${esc(t('budget.subcategoryPlaceholder'))}</option>`;
+}
+
+/* Leerer Platzhalter der Kategorie-Auswahl im Buchungsdialog (A5 P2-4). Hier
+ * stand `defaultCategory()` - die erste Kategorie als Vorgabe, genau die Regel,
+ * die still Miete buchte; aufgerufen wurde sie zuletzt nirgends mehr. `disabled`:
+ * zurueck auf "keine Wahl" fuehrt kein Weg, nur zu einer anderen Kategorie. */
+function categoryPlaceholderOption(selected) {
+  return `<option value="" disabled${selected ? ' selected' : ''}>${esc(t('budget.categoryPlaceholder'))}</option>`;
 }
 
 function getMonthName(monthIndex) {
@@ -217,6 +240,9 @@ let state = {
   groupByResponsible: false,  // Liste nach Zustaendigem gruppieren (#1057)
   scope:       'mine',        // Ansichts-Filter im personal-Modus: 'mine' | 'household'
   expensesOnly: false,        // Anzeige „Nur Ausgaben" (#504): Einnahmen+Saldo ausblenden
+  categoriesExpanded: false,  // Kategorie-Diagramm einspaltig ganz aufgeklappt (sonst Top 3)
+  balanceExpanded: false,     // mobil: Bilanz-Karten unter der Kopfzeile aufgeklappt (balanceGlanceHtml)
+  loansExpanded: false,       // mobil: Darlehens-Karten unter der Glance-Zeile aufgeklappt (metricGlanceHtml)
   meta:        { expenseCategories: [], incomeCategories: [], subcategories: {} },
   // Zeitachse der Berichte: dieselbe Kopfleiste wie der Monat, nur mit
   // umschaltbarer Auflösung. Der Anker lebt hier statt in budget-stats.js, damit
@@ -229,11 +255,19 @@ let state = {
   // nicht mehr vergleichbar.
   reportRangeFrom: null,
   reportRangeTo:   null,
+  // Suche im Hauptbuch (C6): die Anfrage und ihre Treffer aus ALLEN Monaten.
+  // `ledgerResults` ist null, solange nicht gesucht wird.
+  ledgerQuery:     '',
+  ledgerResults:   null,
+  ledgerTruncated: false,
+  ledgerError:     null,
 };
+let _ledgerSeq = 0;    // nur die juengste Suchantwort darf die Liste setzen
 let _container = null;
 let _user = null;
 let _tablist = null;   // wireTablist-Handle: erlaubt programmatische Tab-Wechsel (sync)
 let _scopeTablist = null;
+let _asideFit = null;  // ResizeObserver der Uebersicht-Seitenleiste (watchAsideFit)
 
 // Fähigkeiten je Untertab — EINE Quelle für Monatsnavigation, Toolbar-„+" und FAB.
 // Vorher lagen diese drei Entscheidungen in getrennten Ausschluss-Listen, was sich
@@ -251,22 +285,22 @@ let _scopeTablist = null;
 // anderer Position, in anderem Format und mit eigenem, nicht synchronisiertem
 // Anker: Budget auf März gestellt, Wechsel auf Berichte zeigte Juli.
 const TAB_CAPS = {
-  'budget':         { month: true,  add: 'budget.newEntryFabLabel' },
-  'plan':           { month: true,  add: 'budget.planAddBudget' },
-  'accounts':       { month: false, note: 'budget.periodNoteAccounts',      add: 'budget.addAccount' },
-  'subscriptions':  { month: false, note: 'budget.periodNoteSubscriptions', add: 'subscriptions.add' },
-  'loans':          { month: false, note: 'budget.periodNoteLoans',         add: 'budget.newLoan' },
+  'budget':         { month: true,  add: 'budget.newEntryFabLabel', label: 'newLabel.budget' },
+  'plan':           { month: true,  add: 'budget.planAddBudget',                                label: 'newLabel.budgetPlan' },
+  'accounts':       { month: false, note: 'budget.periodNoteAccounts',      add: 'budget.addAccount', label: 'newLabel.budgetAccount' },
+  'subscriptions':  { month: false, note: 'budget.periodNoteSubscriptions', add: 'subscriptions.add', label: 'newLabel.subscriptions' },
+  'loans':          { month: false, note: 'budget.periodNoteLoans',         add: 'budget.newLoan',    label: 'newLabel.budgetLoan' },
   'reports':        { month: true,  range: true, add: null },
-  // `add: null` wie Berichte: Split-Ausgaben bringt seine eigene Primaeraktion
-  // mit (Kopfknopf + FAB in split-expenses.js). Vorher stand hier derselbe
-  // Aktionsname wie im eingebetteten Kopf, und der generische Kopfknopf UND
-  // der generische FAB dieser Seite delegierten beide per Klick an
-  // #split-add-expense - macht mit dem eigenen Kopfknopf und dem eigenen FAB
-  // der Unterseite VIER Ausloeser fuer dieselbe Handlung (Cross-Modul-Review:
-  // "drei violette Add-Knoepfe zugleich"). Split-Ausgaben ist das einzige
-  // Sub-Tab mit eigenem Primaerknopf/-FAB; die anderen sechs teilen sich
-  // Budgets generische Knoepfe, weil sie keinen eigenen mitbringen.
-  'split-expenses': { month: false, note: 'budget.periodNoteSplit',         add: null },
+  // EINE Neu-Aktion, und sie wohnt im Budget-Kopf wie auf jedem anderen Tab
+  // (Critique 2026-09-25). Bis dahin stand hier `add: null`, und die Unterseite
+  // brachte einen eigenen Sekundaerknopf und einen eigenen FAB mit - der
+  // schwebte am Desktop ueber „87,50 €", weil die geteilte Regel „wo ein
+  // beschrifteter Kopfknopf steht, schwebt keiner" ihn nicht kannte. Jetzt ist
+  // es derselbe Weg wie ueberall: der Budget-FAB, am Desktop in den Kopf
+  // gedockt, oeffnet den Ausgaben-Dialog der Unterseite (openNewSplitExpense).
+  // Im Archiv blendet syncAddAction() ihn aus - die Regel dafuer fragt die
+  // Unterseite selbst (canAddSplitExpense).
+  'split-expenses': { month: false, note: 'budget.periodNoteSplit',         add: 'splitExpenses.addExpense', label: 'newLabel.splitExpenses' },
 };
 
 // Sentinel für „keine eigene Farbe" im Kontofarb-Wähler: der echte Wert ist der
@@ -277,6 +311,30 @@ const DEFAULT_COLOR_ID = 'default';
 function tabFromQuery(search) {
   const tab = new URLSearchParams(search || '').get('tab');
   return tab && Object.hasOwn(TAB_CAPS, tab) ? tab : null;
+}
+
+/* DER REITER STEHT IN DER ADRESSE (Re-Critique 2026-09-27, A5 P2-1).
+ * `?tab=` wurde nur gelesen: wer auf Aufteilung wechselte und neu lud, stand
+ * wieder in der Uebersicht, und wer ueber `?tab=subscriptions` kam und auf
+ * Darlehen wechselte, hatte eine Adresse, die einen anderen Reiter nannte.
+ * Jetzt schreibt der Wechsel `?tab=` - per replaceState, denn ein Reiter ist
+ * kein Ort, zu dem "Zurueck" einzeln fuehren soll. `path` im State, weil der
+ * Router ihn bei popstate liest (router.js). Fremde Parameter (`group` aus dem
+ * Dashboard-Sprung) bleiben stehen. */
+function tabSearch(search, tab) {
+  const params = new URLSearchParams(search || '');
+  params.set('tab', tab);
+  return `?${params.toString()}`;
+}
+
+function writeTabToUrl(tab) {
+  const loc = globalThis.location;
+  const hist = globalThis.history;
+  if (!loc || typeof hist?.replaceState !== 'function') return;
+  const search = tabSearch(loc.search, tab);
+  if (search === loc.search) return;
+  const path = `${loc.pathname}${search}${loc.hash || ''}`;
+  hist.replaceState({ ...(hist.state ?? {}), path }, '', path);
 }
 
 function tabCaps() {
@@ -315,7 +373,7 @@ const READ_SAFE_ACTIONS = new Set(['loan-filter']);
 // Die schreibenden Bedienhaken OHNE `data-action` - Konten, Leerzustaende und
 // der Kategorie-Verwalter sind einzeln verdrahtet, nicht ueber einen Verteiler.
 const WRITE_HOOKS = [
-  '[data-edit]', '#budget-add-account', '#budget-add-account-empty',
+  '[data-edit]', '#budget-add-account-empty',
   '#budget-empty-loan', '#budget-manage-categories', '#empty-cta-budget',
 ].join(', ');
 
@@ -392,6 +450,16 @@ function currentMonth() {
   return todayKey().slice(0, 7);
 }
 
+/** Liegt der ganze Monat nach heute? Dann ist jede seiner Buchungen erwartet. */
+function isForecastMonth(ym) {
+  return ym > currentMonth();
+}
+
+/** Eine gebuchte Zeile mit einem Datum nach heute ist noch nicht passiert. */
+function isUpcomingEntry(entry) {
+  return !entry.is_pending && entry.date > todayKey();
+}
+
 // Tagesanker für einen Monat: im laufenden Monat der heutige Tag, sonst der
 // Monatserste. So landet ein Wechsel Budget → Berichte im gewählten Monat,
 // ohne bei „Woche" auf einen willkürlichen Tag zu springen.
@@ -444,6 +512,9 @@ async function loadMonth(month) {
     state.loadError   = null;
     state.month       = month;
     state.entries     = entriesRes.data;
+    // Nach jedem Schreiben laedt der Monat neu - die Treffer der Suche mit,
+    // sonst stuende eine geloeschte Buchung weiter in der Trefferliste.
+    if (state.ledgerQuery) await loadLedgerSearch(state.ledgerQuery);
     state.summary     = summaryRes.data;
     state.prevSummary = prevSummaryRes.data;
     state.loans       = loansRes.data;
@@ -461,6 +532,69 @@ async function loadMonth(month) {
     state.prevSummary = null;
     state.loans       = { loans: [], summary: { active_count: 0, remaining_amount: 0, remaining_installments: 0 } };
   }
+}
+
+/* DIE SUCHE IM HAUPTBUCH (Re-Critique 2026-09-27, C6). "Wann war die letzte
+ * Zahnarztrechnung?" hiess Monate blaettern. Der Server sucht ueber alle
+ * Monate (GET /budget?q=), gefaltet wie die globale Suche; Konto-Drilldown und
+ * Mein/Haushalt gelten weiter. Die Antwort setzt nur die Liste, nicht die
+ * Seite - das Feld behaelt den Fokus. */
+async function loadLedgerSearch(query) {
+  const seq = ++_ledgerSeq;
+  const accountQuery = state.accountFilterId ? `&account_id=${state.accountFilterId}` : '';
+  const scopeQuery = state.budgetMode === 'personal' ? `&scope=${state.scope}` : '';
+  try {
+    const res = await api.get(`/budget?q=${encodeURIComponent(query)}${accountQuery}${scopeQuery}`);
+    if (seq !== _ledgerSeq) return false;
+    state.ledgerResults = res.data ?? [];
+    state.ledgerTruncated = !!res.meta?.truncated;
+    state.ledgerError = null;
+  } catch (err) {
+    if (seq !== _ledgerSeq) return false;
+    console.error('[Budget] Suche im Hauptbuch:', err);
+    state.ledgerResults = [];
+    state.ledgerTruncated = false;
+    state.ledgerError = err;
+  }
+  return true;
+}
+
+async function runLedgerSearch(value) {
+  const query = String(value ?? '').trim().slice(0, 100);
+  state.ledgerQuery = query;
+  if (!query) {
+    _ledgerSeq += 1;
+    state.ledgerResults = null;
+    state.ledgerError = null;
+    paintLedger();
+    return;
+  }
+  if (await loadLedgerSearch(query)) paintLedger();
+}
+
+/** Nur die Liste und die Statuszeile neu - Kopf, Bilanz und Suchfeld bleiben stehen. */
+function paintLedger() {
+  const list = _container?.querySelector('#budget-list');
+  if (list) {
+    list.replaceChildren();
+    list.insertAdjacentHTML('beforeend', renderEntries());
+    if (window.lucide) lucide.createIcons({ el: list });
+  }
+  const status = _container?.querySelector('#budget-ledger-status');
+  if (status) status.textContent = ledgerStatusText();
+}
+
+function ledgerStatusText() {
+  if (!state.ledgerQuery || !state.ledgerResults || state.ledgerError) return '';
+  const count = state.ledgerResults.length;
+  if (!count) return '';
+  return state.ledgerTruncated
+    ? t('budget.ledgerSearchTruncated', { limit: count })
+    : t('budget.ledgerSearchCount', { count });
+}
+
+function findEntry(id) {
+  return state.entries.find((e) => e.id === id) ?? state.ledgerResults?.find((e) => e.id === id);
 }
 
 async function loadAccounts() {
@@ -593,6 +727,11 @@ export async function render(container, { user }) {
   const tabFromUrl = tabFromQuery(window.location.search);
   if (tabFromUrl) state.activeTab = tabFromUrl;
   if (user?.access_scope === 'split_guest') state.activeTab = 'split-expenses';
+  // Ohne Parameter zeigt die Seite den zuletzt aktiven Reiter - die Adresse
+  // nennt ihn ab jetzt auch, sonst fuehrte ein Neuladen woanders hin. Hier,
+  // vor dem ersten await: der Router hat die Adresse gerade gesetzt, und
+  // spaeter koennte sie schon einer anderen Seite gehoeren.
+  writeTabToUrl(state.activeTab);
 
   if (user?.access_scope !== 'split_guest') {
     try {
@@ -615,7 +754,7 @@ export async function render(container, { user }) {
 
   setHtml(container, `
     <div class="budget-page app-page app-page--reading page-measure--narrow" data-composition="reading">
-      <div class="page-toolbar page-toolbar--wrap page-toolbar--narrow budget-nav">
+      <div class="page-toolbar page-toolbar--wrap page-toolbar--narrow page-toolbar--period budget-nav">
         <h1 class="page-toolbar__title">${t('budget.title')}</h1>
         <!-- Der Kopf-Slot bleibt auf jedem Tab besetzt: entweder Stepper oder
              ein ruhiger Kontexttext. Eine Lücke machte jeden Tabwechsel zur
@@ -628,12 +767,11 @@ export async function render(container, { user }) {
             return `<button class="sub-tab${on ? ' sub-tab--active' : ''}" type="button" role="tab" data-tab-id="${id}" aria-selected="${on ? 'true' : 'false'}" tabindex="${on ? '0' : '-1'}"><span class="sub-tab__label">${label}</span></button>`;
           }).join('')}
         </div>` : ''}
-        <div class="page-toolbar__actions">
-          <button class="btn btn--primary toolbar-new-btn" id="budget-add" aria-label="${t('budget.addEntryLabel')}">
-            <i data-lucide="plus" aria-hidden="true"></i>
-            <span class="toolbar-new-btn__label">${t('newLabel.budget')}</span>
-          </button>
-        </div>
+        <!-- Slot fuer die Primaeraktion: am Zeigergeraet dockt der Router den
+             FAB (#fab-new-budget) hier an, mit dem Nomen des aktiven Tabs
+             (TAB_CAPS.label, syncAddAction). Kein eigener Kopfknopf mehr
+             (Komponenten-Kanon, Runde 7 D3). -->
+        <div class="page-toolbar__actions"></div>
         <!-- Bar-Zeile des Kopfs (Werkzeugzeilen-Regel): die 7 Tabs teilten sich
              den Actions-Slot mit dem Primaerknopf und hatten bei 1280px 138px
              fuer 606px Inhalt - 1 von 7 Tabs sichtbar. -->
@@ -667,6 +805,9 @@ export async function render(container, { user }) {
   // `#budget-body` bleibt ueber jeden renderBody() hinweg dasselbe Element -
   // nur seine Kinder werden ersetzt -, also genuegt EIN Riegel pro Seitenaufbau.
   container.querySelector('#budget-body')?.addEventListener('click', readOnlyLatch, true);
+  // Werkzeug-Menue der Buchungsliste (listToolsMenuHtml): Position, Schliessen
+  // und Pfeiltasten haengen an der stabilen Wurzel, nicht am ersetzten Panel.
+  installPopoverMenus(container);
 
   // Vor dem ersten Laden synchronisieren, nicht erst danach: `state.month` und
   // `state.activeTab` stehen schon, also kann „Aktuell" seinen Zielzustand VOR
@@ -736,24 +877,30 @@ function wireNav() {
       renderBody();
     },
   });
-  // Neu-Aktion je Tab — spiegelt TAB_CAPS.add. Tabs ohne Neu-Aktion (Berichte,
-  // Split-Ausgaben - die Unterseite bringt ihren eigenen Kopfknopf/FAB mit)
-  // blenden beide Auslöser aus, der Handler bleibt dort folgenlos.
-  // Kopfknopf und FAB blendet CSS aus (html[data-module-readonly]); der Handler
-  // bleibt trotzdem gesperrt - ausgeblendet ist nicht unerreichbar, und der
-  // Plan-Zweig klickt einen Knopf per `.click()`.
+  // Die gleitende Auswahl-Kapsel (utils/segment-indicator.js) - dieselbe
+  // Bewegung wie jede Segment- und Tab-Leiste der App (Kanon, Runde 7 D8).
+  // Beide Leisten leben im Kopf und ueberstehen jeden Tabwechsel; die Kapsel
+  // folgt dem Aktiv-Wechsel von wireTablist selbst.
+  const scopeBar = _container.querySelector('.budget-scope');
+  if (scopeBar) attachSegmentIndicator(scopeBar);
+  // Neu-Aktion je Tab - spiegelt TAB_CAPS.add. Tabs ohne Neu-Aktion (Berichte,
+  // Aufteilung im Archiv) blenden den FAB aus, der Handler bleibt dort folgenlos.
+  // Den FAB blendet CSS aus (html[data-module-readonly]); der Handler
+  // bleibt trotzdem gesperrt - ausgeblendet ist nicht unerreichbar. Der
+  // Plan-Zweig ruft openAddPlan() direkt; der Koerper des Plans traegt seit
+  // R10 (L11) keinen eigenen Anlegen-Knopf mehr.
   const addHandler = () => {
     if (readOnly()) return;
     switch (state.activeTab) {
       case 'subscriptions':  openSubscriptionModal(); return;
-      case 'plan':           _container.querySelector('#budget-plan-add')?.click(); return;
+      case 'plan':           openAddPlan(); return;
       case 'accounts':       openAccountModal(); return;
       case 'loans':          openLoanModal(); return;
+      case 'split-expenses': openNewSplitExpense(); return;
       case 'reports':        return;
       default:               openBudgetModal({ mode: 'create' });
     }
   };
-  _container.querySelector('#budget-add').addEventListener('click', addHandler);
   findPageFab('fab-new-budget').addEventListener('click', addHandler);
   // Geteilte Tablist-Verhaltensschicht (Klick + Pfeiltasten/Home/End + Roving-
   // Tabindex + ARIA) — dieselbe Grammatik wie Rewards/Haushaltshilfe statt einer
@@ -764,6 +911,7 @@ function wireNav() {
     onChange: async (id) => {
       const prev = state.activeTab;
       state.activeTab = id;
+      writeTabToUrl(id);
       // Eine Zeitachse über den Tabwechsel hinweg: der Monat aus dem Budget-Tab
       // wird zum Anker der Berichte und umgekehrt. Vorher hielt budget-stats.js
       // einen eigenen Anker, sodass ein im Budget gewählter März in den Berichten
@@ -772,6 +920,7 @@ function wireNav() {
         state.reportAnchor = anchorForMonth(state.month);
       }
       renderBody();
+      markTabEntering();
       if (prev === 'reports' && id !== 'reports') {
         const ym = state.reportAnchor.slice(0, 7);
         if (ym !== state.month) {
@@ -783,6 +932,7 @@ function wireNav() {
   });
   // Edge-Fade + Aktiver-Tab-in-Sicht übernimmt jetzt wireTablist zentral
   // (Audit A2-18: gleiche Affordanz für Budget, Haushaltshilfe, Rewards).
+  attachSegmentIndicator(_container.querySelector('.budget-tabs'));
   updateLabel();
 }
 
@@ -799,12 +949,52 @@ function updateLabel() {
 }
 
 // --------------------------------------------------------
+// Uebersicht: Seitenleiste nur anheften, wenn sie ganz hineinpasst
+// --------------------------------------------------------
+
+/* STICKY NUR, WENN DIE LEISTE IN DEN SCROLLPORT PASST.
+ * Ab ~960px Container steht die Bilanz samt Kategorien rechts neben den
+ * Buchungen und bleibt beim Scrollen stehen (budget.css, .budget-overview).
+ * Eine angeheftete Leiste, die hoeher ist als der Scrollport, zeigte ihr
+ * unteres Ende aber erst am Listenende - mit vielen Kategorien oder auf einem
+ * niedrigen Fenster waeren die letzten Kategorien dann fast unerreichbar. Die
+ * Hoehe der Leiste haengt an den Daten (Kategorienzahl, Hinweiszeile), nicht am
+ * Fenster, deshalb misst ein ResizeObserver statt einer Media-Query. Ohne
+ * Klasse scrollt die Leiste einfach mit - derselbe EINE Scrollport. */
+function watchAsideFit(panel) {
+  _asideFit?.disconnect();
+  _asideFit = null;
+  const aside = panel?.querySelector('.budget-overview__aside');
+  if (!aside || typeof ResizeObserver === 'undefined') return;
+  const check = () => {
+    if (!aside.isConnected) { _asideFit?.disconnect(); _asideFit = null; return; }
+    aside.classList.toggle('budget-overview__aside--pinned', aside.offsetHeight <= panel.clientHeight);
+  };
+  _asideFit = new ResizeObserver(check);
+  _asideFit.observe(panel);
+  _asideFit.observe(aside);
+}
+
+// --------------------------------------------------------
 // Body
 // --------------------------------------------------------
+
+/* DER NEUE REITER BLENDET EIN (R14 P11, A5 P3). Die Untertabs wechselten per
+ * hartem Schnitt, waehrend jeder Seitenwechsel blendet. Nur der Wechsel selbst
+ * blendet - ein Neuaufbau desselben Reiters (Filter, Monat, Speichern) nicht;
+ * die Klasse faellt nach der Blende. Unter reduzierter Bewegung schneidet die
+ * globale Sperre (reset.css) die Animation ab. */
+function markTabEntering() {
+  const panel = _container?.querySelector('#budget-body > .budget-tab-panel');
+  if (!panel) return;
+  panel.classList.add('budget-tab-panel--entering');
+  panel.addEventListener('animationend', () => panel.classList.remove('budget-tab-panel--entering'), { once: true });
+}
 
 function renderBody() {
   const body = _container.querySelector('#budget-body');
   if (!body) return;
+  watchAsideFit(null);
   updateLabel();
 
   // Vor jedem Tab-Zweig: nach einem Ladefehler sind Eintraege UND Summen leer,
@@ -846,7 +1036,7 @@ function renderBody() {
       // rohen Grenzen (reportRangeFrom/To) braucht reportShowsToday() für die
       // Containment-Prüfung von „Aktuell" bei Auflösung „Woche".
       onPeriod: ({ from, to }) => {
-        state.reportPeriod = `${formatDate(from)} – ${formatDate(to)}`;
+        state.reportPeriod = `${formatDate(from)} - ${formatDate(to)}`;
         state.reportRangeFrom = from;
         state.reportRangeTo   = to;
         if (state.activeTab === 'reports' && state.range === 'week') {
@@ -897,7 +1087,7 @@ function renderBody() {
     // Fehlermeldung stand darunter als Beschreibung - ein Leerzustand, der
     // aussieht, als sei nichts angelegt. Titel ist jetzt der Fehler selbst,
     // und es gibt einen Weg zurueck.
-    const loadSplitExpenses = () => renderSplitExpenses(panel, { embedded: true, user: _user })
+    const loadSplitExpenses = () => renderSplitExpenses(panel, { embedded: true, user: _user, onAddableChange: syncAddAction })
       .catch((err) => {
         console.error('[Budget] split expenses render error:', err);
         mountLoadError(panel, {
@@ -924,6 +1114,15 @@ function renderBody() {
       ? 'metric-card--balance-positive'
       : 'metric-card--balance-negative';
   const prevLabel = p ? formatMonthLabel(p.month).split(' ')[0].slice(0, 3) : '';
+
+  /* EIN MONAT, DER NOCH KOMMT, IST EINE PROGNOSE (Critique 2026-09-25). Seine
+   * Buchungen sind Serien, die der Server beim Aufruf fuer den Monat anlegt -
+   * gezaehlt wie gebuchtes Geld, aber keine davon ist passiert. Der Saldo stand
+   * gruen da wie ein Fakt („Saldo 3.498,53 €"). Der Client braucht dafuer
+   * keine Server-Angabe: jede Buchung eines spaeteren Monats liegt nach heute.
+   * Der Titel sagt es als Text, der Saldo verliert den Ton der Tatsache. */
+  const forecast = isForecastMonth(state.month);
+  const balanceTone = forecast ? 'metric-card--forecast' : balanceClass;
 
   // Erwartete Buchungen stecken in keiner der drei Karten (#637). Ohne diese
   // Zeile verschwaende das Geld zwischen zwei Monatsansichten: die Buchung steht
@@ -965,16 +1164,34 @@ function renderBody() {
       </div>`;
   // Rolle `balance`: hier trägt die Zahl selbst die Richtung.
   const balanceCard = `
-      <div class="metric-card ${balanceClass}">
+      <div class="metric-card ${balanceTone}">
         <div class="metric-card__label">${t('budget.balance')}</div>
         <div class="metric-card__value">${amountByRole(s.balance, 'balance').text}</div>
         ${p && !balanceNeutral ? renderTrend(s.balance, p.balance, prevLabel, 'higher') : ''}
       </div>`;
 
+  const chartBlocks = categoryBlocks(s.byCategory);
+  /* EIN LEERER MONAT HAT KEINE BILANZ (Critique 2026-09-25). Dreimal „0,00 €"
+   * in 28px ueber einem Leerzustand, der drei Saetze stapelte, war der lauteste
+   * Teil einer Seite ohne Inhalt. Ohne Buchung und ohne erwartete Buchung
+   * entfaellt die Seitenleiste ganz; der Leerzustand spricht allein. */
+  const monthEmpty = !state.entries.length && !s.income && !s.expenses && !s.pending?.count;
+
   setHtml(body, `
     <div class="budget-tab-panel page-scrollport budget-tab-panel--budget">
-    <!-- Anzeige-Umschalter: nur Ausgaben vs. volle Zusammenfassung -->
-    <div class="budget-summary-bar">
+    <!-- EIN Scrollport (das Panel). Ab ~960px Container zwei Spalten: links die
+         Buchungen als Hauptinhalt, rechts Bilanz und Kategorien, sticky. Die
+         Seitenleiste steht im Markup VORN, damit Lese- und Tab-Reihenfolge
+         einspaltig dieselbe bleibt (Bilanz, Kategorien, Buchungen). -->
+    <div class="budget-overview">
+    ${monthEmpty ? '' : `<div class="budget-overview__aside">
+    ${balanceGlanceHtml(s, { expensesOnly, forecast, balanceTone })}
+    <div class="budget-balance-details${state.balanceExpanded ? ' is-expanded' : ''}" id="budget-balance-details">
+    <!-- Kopfzeile der Bilanz: Titel links, "Nur Ausgaben" rechts - der
+         Umschalter wirkt nur auf die Karten darunter und steht deshalb in
+         deren Kopf statt in einer eigenen Zeile ueber der Seite. -->
+    <div class="budget-summary-head">
+      <h2 class="u-section-title" id="budget-summary-title">${t(forecast ? 'budget.summaryTitleForecast' : 'budget.summaryTitle')}</h2>
       <button class="budget-expenses-toggle${expensesOnly ? ' budget-expenses-toggle--active' : ''}"
               id="budget-expenses-only" type="button" role="switch"
               aria-checked="${expensesOnly ? 'true' : 'false'}"
@@ -987,23 +1204,40 @@ function renderBody() {
     <div class="metric-grid${expensesOnly ? ' metric-grid--expenses-only' : ''}">
       ${expensesOnly ? expensesCard : incomeCard + expensesCard + balanceCard}
     </div>
+    </div>
     ${pendingNote}
 
     <!-- Kategorie-Balken -->
     ${s.byCategory.length ? `
-    <div class="budget-chart-section">
-      <div class="budget-chart-section__title u-section-title">${t('budget.byCategory')}</div>
+    <div class="budget-chart-section${state.categoriesExpanded ? ' is-expanded' : ''}">
+      <!-- Kopfzeile wie die der Bilanz: Titel links, das Aufklappen rechts -
+           in der Zeile, die der Titel ohnehin belegt, statt als eigene
+           Fusszeile unter den Balken. Unter dem Titel steht, solange der
+           Einnahmen-Block eingeklappt ist, seine Summe (chartIncomeLine). -->
+      <div class="budget-chart-head">
+        <div class="budget-chart-head__text">
+          <h2 class="budget-chart-section__title u-section-title">${t('budget.byCategory')}</h2>
+          ${chartIncomeLine(chartBlocks)}
+        </div>
+        ${chartHasMore(chartBlocks) ? `
+        <button type="button" class="budget-chart-more" id="budget-chart-more"
+                aria-expanded="${state.categoriesExpanded ? 'true' : 'false'}" aria-controls="budget-chart">
+          <span class="budget-chart-more__label">${esc(chartMoreLabel(s.byCategory.length))}</span>
+          <i data-lucide="chevron-down" class="icon-sm budget-chart-more__icon" aria-hidden="true"></i>
+        </button>` : ''}
+      </div>
       <p class="sr-only">${esc(chartSummary(s.byCategory))}</p>
-      <div class="budget-chart">
+      <div class="budget-chart" id="budget-chart">
         ${renderCategoryBars(s.byCategory)}
       </div>
     </div>` : ''}
+    </div>`}
 
     <!-- Transaktionsliste -->
     <div class="budget-list-section">
-      <div class="budget-list-header">
-        <div>
-          <span class="budget-list-header__title u-section-title">${t('budget.transactions')}</span>
+      <div class="budget-list-header section-toolbar">
+        <div class="budget-list-header__lead">
+          <h2 class="budget-list-header__title u-section-title" >${t('budget.transactions')}</h2>
           ${state.accountFilterId ? `
           <button class="budget-account-chip" id="budget-clear-account-filter" type="button"
                   aria-label="${t('budget.clearAccountFilter')}">
@@ -1020,32 +1254,32 @@ function renderBody() {
             <i data-lucide="x" class="icon-sm" aria-hidden="true"></i>
           </button>` : ''}
         </div>
-        <div class="budget-list-header__actions">
-        ${state.entries.some((e) => e.responsible_users?.length) ? `
-        <button class="btn btn--secondary${state.groupByResponsible ? ' is-active' : ''}" id="budget-group-responsible"
-          type="button" aria-pressed="${state.groupByResponsible ? 'true' : 'false'}"
-          title="${esc(t('budget.groupByResponsible'))}">
-          <i data-lucide="users" class="icon-sm" aria-hidden="true"></i>${esc(t('budget.groupByResponsible'))}
-        </button>` : ''}
-        ${readOnly() ? '' : `
-        <button class="btn btn--secondary budget-manage-categories" id="budget-manage-categories"
-          title="${t('budget.manageCategories')}">
-          <i data-lucide="tags" class="icon-sm" aria-hidden="true"></i>${t('budget.manageCategories')}
-        </button>`}
-        ${state.entries.length ? `
-        <a href="/api/v1/budget/export?month=${state.month}${state.budgetMode === 'personal' ? `&scope=${state.scope}` : ''}" class="btn btn--secondary budget-csv-export">
-          <i data-lucide="download" class="icon-sm" aria-hidden="true"></i>CSV
-        </a>` : ''}
-        </div>
+        <!-- Suche im Hauptbuch (C6): das geteilte Feld im Kopf der Liste, die es
+             filtert - mobil in seiner Icon-Form (layout.css, .section-toolbar),
+             damit die erste Buchung nicht um eine Feldzeile nach unten rutscht.
+             Es sucht in allen Monaten; die Statuszeile darunter sagt, wie viele. -->
+        ${renderPageSearch({
+    id: 'budget-ledger-search',
+    label: t('budget.ledgerSearchLabel'),
+    placeholder: t('budget.ledgerSearchPlaceholder'),
+    value: state.ledgerQuery,
+    clearLabel: t('common.searchClear'),
+    className: 'budget-list-header__search',
+  })}
+        <div class="budget-list-header__actions">${listToolsMenuHtml()}</div>
       </div>
-      <div class="budget-list page-scrollport" id="budget-list">
+      <p class="budget-list-search__status" id="budget-ledger-status" role="status">${esc(ledgerStatusText())}</p>
+      <div class="budget-list" id="budget-list">
         ${renderEntries()}
       </div>
+    </div>
     </div>
     </div>
   `);
 
   if (window.lucide) lucide.createIcons({ el: body });
+  watchAsideFit(body.querySelector('.budget-tab-panel--budget'));
+  wirePageSearch(body, { id: 'budget-ledger-search', delay: 250, onQuery: runLedgerSearch });
   _container.querySelector('#empty-cta-budget')?.addEventListener('click', () => {
     document.querySelector('.page-fab')?.click();
   });
@@ -1055,6 +1289,9 @@ function renderBody() {
     vibrate(10);
     renderBody();
   });
+  _container.querySelector('#budget-chart-more')?.addEventListener('click', toggleCategoryChart);
+  _container.querySelector('#budget-categories-more')?.addEventListener('click', toggleCategoryChart);
+  _container.querySelector('#budget-balance-more')?.addEventListener('click', toggleBalanceDetails);
   _container.querySelector('#budget-manage-categories')?.addEventListener('click', openCategoryManager);
   _container.querySelector('#budget-clear-account-filter')?.addEventListener('click', async () => {
     state.accountFilterId = null;
@@ -1072,8 +1309,12 @@ function renderBody() {
     try { localStorage.setItem(GROUP_RESPONSIBLE_KEY, state.groupByResponsible ? '1' : '0'); } catch (_) { /* Private-Mode */ }
     vibrate(10);
     renderBody();
+    // Der Eintrag lag im Menue, das mit dem Neuaufbau verschwindet - der Fokus
+    // geht an dessen Knopf zurueck statt auf <body>.
+    _container.querySelector('.budget-list-tools')?.focus();
   });
-  stagger(_container.querySelector('#budget-list')?.querySelectorAll('.budget-entry') ?? []);
+  // Traeger ist `#budget-body`: `#budget-list` baut jeder renderBody() neu.
+  stagger(_container.querySelector('#budget-list')?.querySelectorAll('.budget-entry') ?? [], { host: _container.querySelector('#budget-body') });
 
   _container.querySelector('#budget-list')?.addEventListener('click', async (e) => {
     // Der Riegel vor der ersten Aktion (siehe READ_SAFE_ACTIONS): das Markup
@@ -1082,9 +1323,6 @@ function renderBody() {
     // bleibt - er liest nur.
     const action = e.target.closest('[data-action]');
     if (action && readOnly() && !READ_SAFE_ACTIONS.has(action.dataset.action)) return;
-
-    const delBtn = e.target.closest('[data-action="delete"]');
-    if (delBtn) { await deleteEntry(parseInt(delBtn.dataset.id, 10)); return; }
 
     const confirmBtn = e.target.closest('[data-action="confirm"]');
     if (confirmBtn) { await openConfirmBookingModal(parseInt(confirmBtn.dataset.id, 10)); return; }
@@ -1104,7 +1342,7 @@ function renderBody() {
     // `read` in die Leseansicht, und die ist der Leseweg dieser Zeile.
     const item = e.target.closest('.budget-entry[data-id]');
     if (item && !action) {
-      const entry = state.entries.find((e) => e.id === parseInt(item.dataset.id, 10));
+      const entry = findEntry(parseInt(item.dataset.id, 10));
       if (entry) openBudgetModal({ mode: 'edit', entry });
     }
   });
@@ -1141,87 +1379,306 @@ function updateTabs() {
     if (caps.note) note.textContent = t(caps.note);
   }
 
-  // Toolbar-„+" und FAB zeigen dieselbe Aktion mit demselben Label — oder beide
-  // gar nichts (Berichte hat keine Neu-Aktion).
-  const addLabel = caps.add ? t(caps.add) : '';
-  const addBtn = _container.querySelector('#budget-add');
-  if (addBtn) {
-    addBtn.hidden = !caps.add;
-    if (caps.add) {
-      addBtn.setAttribute('aria-label', addLabel);
-      addBtn.setAttribute('title', addLabel);
-      /* DAS SICHTBARE WORT GILT NUR FUER DEN EINTRAG.
-       *
-       * Der Kopfknopf trug fest `newLabel.budget` ("Eintrag"), waehrend diese
-       * Funktion seine Aktion je Tab umstellt: auf "Konten" stand sichtbar
-       * "Eintrag" und im `aria-label` "Konto hinzufuegen". Das ist zweimal
-       * falsch - es fuehrt den Zeigernutzer in die Irre, und der sichtbare Text
-       * steht nicht im zugaenglichen Namen (WCAG 2.5.3, Sprachsteuerung kann
-       * den Knopf nicht ansprechen; Codex-Review zu PR #754).
-       *
-       * Das Wort faellt dort weg, statt ein falsches zu behalten: `newLabel`
-       * fuehrt Nomen je MODUL, nicht je Untertab, und die vier fehlenden
-       * ("Budget", "Konto", "Abo", "Darlehen") waeren vier neue Schluessel in
-       * 24 Sprachen - eine eigene Runde, keine Zeile in einem Fix. Ohne Text
-       * benennt das `aria-label` den Knopf allein, und das tut es korrekt. */
-      const labelSpan = addBtn.querySelector('.toolbar-new-btn__label');
-      if (labelSpan) labelSpan.hidden = caps.add !== 'budget.newEntryFabLabel';
-    }
-  }
+  syncAddAction();
+}
+
+/**
+ * EIN Anlege-Knopf je Tab: der FAB (#fab-new-budget), mobil schwebend, am
+ * Zeigergeraet vom Router in den Kopf gedockt. Er zeigt die Aktion des aktiven
+ * Tabs - oder gar nichts (Berichte hat keine Neu-Aktion; die Aufteilung im
+ * Archiv auch nicht). Eigene Funktion, weil die eingebettete Aufteilung sie
+ * bei jedem Archiv-Wechsel erneut ruft (onAddableChange), ohne den ganzen
+ * Tab-Abgleich.
+ *
+ * JEDER TAB NENNT SEIN NOMEN (Komponenten-Kanon, Runde 7 D3). Vorher trug der
+ * handgeschriebene Kopfknopf nur auf zwei Tabs ein Wort ("Eintrag",
+ * "Ausgabe") und auf Plan, Konten, Abos und Darlehen ein nacktes "+", weil
+ * `newLabel` nur Nomen je MODUL kannte. Jetzt hat jeder Tab seins
+ * (`TAB_CAPS.label`), und das sichtbare Wort steht weiter nur dort, wo es zur
+ * Aktion passt: `setPageFabAction` zieht Nomen, `aria-label` und das Wort am
+ * schon angedockten Knopf gemeinsam nach - nie ein Nomen des vorigen Tabs
+ * (WCAG 2.5.3, Codex-Review zu PR #754).
+ */
+function syncAddAction() {
+  const caps = tabCaps();
+  const splitBlocked = caps === TAB_CAPS['split-expenses'] && !canAddSplitExpense();
+  const add = splitBlocked ? null : caps.add;
+  const addLabel = add ? t(add) : '';
   const fab = findPageFab('fab-new-budget');
-  if (fab) {
-    fab.hidden = !caps.add;
-    if (caps.add) fab.setAttribute('aria-label', addLabel);
+  if (!fab) return;
+  // Kein `onClick`: der Handler haengt einmal per addEventListener (render()),
+  // setPageFabAction setzt nur `onclick` und laesst ihn stehen.
+  // Ein versteckter Knopf behaelt ein Nomen: ohne `data-dock-label` dockt der
+  // Router ihn nicht an (dockFabIntoToolbar), und wer per `?tab=reports`
+  // einsteigt, saehe ihn nach dem Wechsel auf einen Anlege-Tab schwebend
+  // statt im Kopf - dasselbe Muster wie der Kontext-FAB der Gesundheit.
+  setPageFabAction(fab, {
+    hidden: !add,
+    label: addLabel,
+    dockLabel: add ? t(caps.label) : (fab.dataset.dockLabel || t('newLabel.budget')),
+  });
+  // Den Titel mit dem Kuerzel zieht setPageFabAction mit dem aria-label nach.
+}
+
+/* ZWEI SKALEN STATT EINER (Critique 2026-09-25, P2). Einnahmen und Ausgaben
+ * teilten sich ein Maximum (`maxAbs` ueber alle Kategorien): das Gehalt
+ * setzte die Skala, und die Ausgaben schrumpften auf 2-68px - der Vergleich
+ * UNTER den Ausgaben, die eigentliche Frage des Diagramms, war nicht mehr
+ * abzulesen. Jetzt zwei Bloecke, jeder nach seinem eigenen Maximum. Die Anteile
+ * bleiben ehrlich (kein Boden im Anteil): verglichen wird nur noch innerhalb
+ * eines Blocks, und die Bloecke tragen ihren Namen und ihre Summe als Text.
+ *
+ * Die Bloecke rechnen mit den getrennten Summen je Kategorie (`income`,
+ * `expenses` aus /budget/summary), nicht mit dem Saldo `total`: eine Kategorie
+ * mit Ein- UND Ausgaben steht in beiden, und jeder Block summiert sich zu
+ * seiner Kennzahl-Karte. Ohne die Felder (aeltere Antwort) entscheidet das
+ * Vorzeichen des Saldos wie bisher. */
+function categoryBlocks(byCategory) {
+  const part = (c, kind) => {
+    const own = kind === 'expenses' ? c.expenses : c.income;
+    if (own != null) return Number(own) || 0;
+    const total = Number(c.total) || 0;
+    return kind === 'expenses' ? Math.min(total, 0) : Math.max(total, 0);
+  };
+  const block = (kind) => byCategory
+    .map((c) => ({ category: c.category, amount: part(c, kind) }))
+    .filter((r) => r.amount !== 0)
+    .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+  return { expenses: block('expenses'), income: block('income') };
+}
+
+const CHART_BLOCKS = [
+  { kind: 'expenses', labelKey: 'budget.expenses' },
+  { kind: 'income', labelKey: 'budget.income' },
+];
+
+function blockTotal(rows) {
+  return rows.reduce((sum, r) => sum + r.amount, 0);
+}
+
+// Screenreader-Zusammenfassung des Kategorie-Diagramms (Audit 1.7): je Block
+// Anzahl Kategorien + groesster Posten mit Anteil AM BLOCK - seit den
+// getrennten Skalen ist ein Anteil an Einnahmen plus Ausgaben keine Aussage
+// mehr. Wird als .sr-only-Text vor dem rein visuellen Balken-Chart ausgegeben.
+function chartSummary(byCategory) {
+  const blocks = categoryBlocks(byCategory);
+  return CHART_BLOCKS
+    .filter(({ kind }) => blocks[kind].length)
+    .map(({ kind, labelKey }) => {
+      const rows = blocks[kind];
+      const total = Math.abs(blockTotal(rows)) || 1;
+      return `${t(labelKey)}: ${t('budget.chartSummary', {
+        count: rows.length,
+        top: categoryLabel(rows[0].category),
+        pct: Math.round((Math.abs(rows[0].amount) / total) * 100),
+      })}`;
+    })
+    .join('. ');
+}
+
+/* EINSPALTIG ZEIGT DAS DIAGRAMM DIE DREI GROESSTEN AUSGABEN (Critique
+ * 2026-09-25, P1). Neun Kategorien kosteten mobil 483px - die erste Buchung
+ * stand bei y=986, unter dem Falz, und auf 1024x768 (Sidebar, 740px Container)
+ * ebenso. Die Frage „wohin ging das Geld" beantworten die groessten Ausgaben.
+ * Der Einnahmen-Block steht dann nur als EINE Summenzeile im Titel des
+ * Diagramms (sie teilt sich die Hoehe der Titelzeile, kostet also keine) und
+ * kommt beim Aufklappen als eigener Block dazu. Gibt es keine Ausgaben, fuehrt
+ * der Einnahmen-Block.
+ *
+ * Die Auswahl ist eine Markierung, keine Kuerzung der Daten: alle Zeilen
+ * stehen im Markup, und budget.css blendet nur aus - und nur, solange die
+ * Uebersicht einspaltig ist (dieselbe 960px-Container-Grenze wie der
+ * Zweispalter). Neben den Buchungen hat das Diagramm seine eigene Spalte und
+ * bleibt voll. Aufgeklappt gilt fuer den ganzen Besuch, auch ueber den
+ * Monatswechsel. */
+const CHART_LEAD = 3;
+
+function chartLeadKind(blocks) {
+  return blocks.expenses.length ? 'expenses' : 'income';
+}
+
+/** Blendet die einspaltige Kurzfassung etwas aus? Nur dann gibt es den Knopf. */
+function chartHasMore(blocks) {
+  const lead = chartLeadKind(blocks);
+  const other = lead === 'expenses' ? 'income' : 'expenses';
+  return blocks[lead].length > CHART_LEAD || blocks[other].length > 0;
+}
+
+/* Die Summe des eingeklappten Einnahmen-Blocks, als zweite Zeile unter dem
+ * Titel „Nach Kategorie". Sie steht nur, solange der Block selbst verborgen
+ * ist (einspaltig, eingeklappt) - budget.css blendet sie sonst aus. */
+function chartIncomeLine(blocks) {
+  if (chartLeadKind(blocks) !== 'expenses' || !blocks.income.length) return '';
+  return `
+          <p class="budget-chart-head__income">
+            <span>${esc(t('budget.income'))}</span>
+            <span class="budget-chart-head__income-amount">${amountByRole(blockTotal(blocks.income), 'flow').text}</span>
+          </p>`;
+}
+
+function chartMoreLabel(count) {
+  return state.categoriesExpanded
+    ? t('budget.showFewerCategories')
+    : t('budget.showAllCategories', { count });
+}
+
+/* Auf- und Zuklappen ohne Neuaufbau: der Knopf behaelt Fokus und Position,
+ * nur Klasse, aria-expanded und Beschriftung ziehen nach. ZWEI Knoepfe steuern
+ * denselben Zustand - der im Diagrammkopf (einspaltig ab 640px) und die Zeile
+ * der mobilen Kopfzeile (balanceGlanceHtml); je Breite ist nur einer zu sehen,
+ * beide muessen aber dasselbe sagen, wenn die Breite wechselt. Die Zeile
+ * behaelt ihren Namen („Alle Kategorien (N)"), ihr Zustand steht im Chevron
+ * und in aria-expanded - wie jede Gruppenzeile. */
+function toggleCategoryChart() {
+  state.categoriesExpanded = !state.categoriesExpanded;
+  const section = _container?.querySelector('.budget-chart-section');
+  section?.classList.toggle('is-expanded', state.categoriesExpanded);
+  for (const btn of _container?.querySelectorAll('#budget-chart-more, #budget-categories-more') ?? []) {
+    btn.setAttribute('aria-expanded', state.categoriesExpanded ? 'true' : 'false');
+    const label = btn.querySelector('.budget-chart-more__label');
+    if (label) label.textContent = chartMoreLabel(state.summary?.byCategory?.length ?? 0);
   }
 }
 
-// Screenreader-Zusammenfassung des Kategorie-Diagramms (Audit 1.7): Anzahl
-// Kategorien + größter Posten mit Anteil. Wird als .sr-only-Text vor dem rein
-// visuellen Balken-Chart ausgegeben.
-function chartSummary(byCategory) {
-  const total = byCategory.reduce((sum, c) => sum + Math.abs(c.total), 0) || 1;
-  const top = byCategory.reduce((a, b) => (Math.abs(b.total) > Math.abs(a.total) ? b : a));
-  const pct = Math.round((Math.abs(top.total) / total) * 100);
-  return t('budget.chartSummary', {
-    count: byCategory.length,
-    top: categoryLabel(top.category),
-    pct,
-  });
+/* MOBIL GEHOERT DER PLATZ DEM HAUPTBUCH (Re-Critique 2026-09-27, A5 P2-5).
+ * Unter 640px standen Bilanz-Titel, drei Kennzahl-Karten und das Diagramm vor
+ * den Buchungen - die erste Buchung bei y=634 von 844, knapp zwei Zeilen
+ * sichtbar. Jetzt steht dort EINE kompakte Kopfzeile in einem Zeilentraeger:
+ * Saldo mit Ein/Aus daneben, darunter die Zeile „Alle Kategorien (N)". Beide
+ * Zeilen sind Aufklapper: die Bilanz klappt die Kennzahl-Karten samt
+ * Vormonatstrend und „Nur Ausgaben" auf, die Kategorien das volle Diagramm -
+ * nichts faellt weg, es wartet nur hinter einem Tipp.
+ *
+ * Nur Markup: budget.css zeigt den Traeger erst unter 640px und blendet dort
+ * die eingeklappten Bereiche aus. Ab 640px bleibt alles wie es war (Karten,
+ * Top 3, Zweispalter ab 960px Container). Der Traeger ist `.row-carrier`,
+ * keine Kennzahl-Karte: eine Zeile, die zusammenfasst und aufklappt, wie die
+ * Gruppenzeilen in Apple Wallet und Einstellungen. */
+function balanceGlanceHtml(s, { expensesOnly, forecast, balanceTone }) {
+  const tone = forecast ? 'forecast'
+    : balanceTone === 'metric-card--balance-positive' ? 'positive'
+      : balanceTone === 'metric-card--balance-negative' ? 'negative' : 'neutral';
+  const lead = expensesOnly
+    ? { label: t('budget.expenses'), value: amountByRole(s.expenses, 'total').text, tone: 'neutral' }
+    : { label: t(forecast ? 'budget.summaryTitleForecast' : 'budget.balance'), value: amountByRole(s.balance, 'balance').text, tone };
+  const flows = expensesOnly ? '' : `
+        <span class="budget-glance__flows">
+          <span class="budget-glance__flow">${esc(t('budget.income'))} <span class="budget-glance__amount">${amountByRole(s.income, 'total').text}</span></span>
+          <span class="budget-glance__flow">${esc(t('budget.expenses'))} <span class="budget-glance__amount">${amountByRole(s.expenses, 'total').text}</span></span>
+        </span>`;
+  const count = s.byCategory?.length ?? 0;
+  return `
+    <div class="row-carrier budget-glance">
+      <button type="button" class="budget-glance__row budget-glance__balance" id="budget-balance-more"
+              aria-expanded="${state.balanceExpanded ? 'true' : 'false'}" aria-controls="budget-balance-details">
+        <span class="budget-glance__lead">
+          <span class="budget-glance__label">${esc(lead.label)}</span>
+          <span class="budget-glance__value budget-glance__value--${lead.tone}">${lead.value}</span>
+        </span>${flows}
+        <i data-lucide="chevron-down" class="icon-sm budget-glance__chevron" aria-hidden="true"></i>
+      </button>
+      ${count ? `
+      <button type="button" class="budget-glance__row budget-glance__categories" id="budget-categories-more"
+              aria-expanded="${state.categoriesExpanded ? 'true' : 'false'}" aria-controls="budget-chart">
+        <span class="budget-glance__title">${esc(t('budget.showAllCategories', { count }))}</span>
+        <i data-lucide="chevron-down" class="icon-sm budget-glance__chevron" aria-hidden="true"></i>
+      </button>` : ''}
+    </div>`;
+}
+
+/* Wie toggleCategoryChart: ohne Neuaufbau, der Knopf behaelt den Fokus. */
+function toggleBalanceDetails() {
+  state.balanceExpanded = !state.balanceExpanded;
+  _container?.querySelector('#budget-balance-details')?.classList.toggle('is-expanded', state.balanceExpanded);
+  _container?.querySelector('#budget-balance-more')?.setAttribute('aria-expanded', state.balanceExpanded ? 'true' : 'false');
+}
+
+/* EIN WERKZEUG-MENUE FUER DIE BUCHUNGSLISTE (Critique 2026-09-25, P1; Muster
+ * „one tools menu" der Dokumente, #1469). Kategorien verwalten, CSV-Export und
+ * die Gruppierung nach Zustaendigen standen als bis zu drei beschriftete
+ * Knoepfe neben „Transaktionen" und brachen mobil in eine zweite und dritte
+ * Zeile um (Listenkopf 124px). Sie aendern nicht, WELCHE Buchungen man sieht -
+ * sie sind Werkzeuge, und die stehen auf jeder Breite an derselben Stelle.
+ *
+ * Die Gruppierung ist ein Umschalter (menuitemcheckbox mit Haken), der Export
+ * ein Link: der Server liefert die Datei, das Menue schliesst beim Klick
+ * (popover-menu.js). Ohne einen einzigen Eintrag (Nur-lesen, leerer Monat,
+ * niemand zustaendig) gibt es auch keinen Knopf. */
+function listToolsMenuHtml() {
+  const items = [];
+  if (state.entries.some((e) => e.responsible_users?.length)) {
+    const on = state.groupByResponsible;
+    items.push(`
+      <button type="button" role="menuitemcheckbox" aria-checked="${on ? 'true' : 'false'}"
+              class="popover-menu__item" id="budget-group-responsible">
+        <i data-lucide="check" class="icon-md popover-menu__item-check${on ? '' : ' popover-menu__item-check--hidden'}" aria-hidden="true"></i>
+        <span>${esc(t('budget.groupByResponsible'))}</span>
+      </button>`);
+  }
+  if (!readOnly()) {
+    items.push(`
+      <button type="button" role="menuitem" class="popover-menu__item budget-manage-categories" id="budget-manage-categories">
+        <i data-lucide="tags" class="icon-md" aria-hidden="true"></i>
+        <span>${esc(t('budget.manageCategories'))}</span>
+      </button>`);
+  }
+  if (state.entries.length) {
+    const href = `/api/v1/budget/export?month=${encodeURIComponent(state.month)}${state.budgetMode === 'personal' ? `&scope=${encodeURIComponent(state.scope)}` : ''}`;
+    items.push(`
+      <a role="menuitem" class="popover-menu__item budget-csv-export" href="${esc(href)}">
+        <i data-lucide="download" class="icon-md" aria-hidden="true"></i>
+        <span>${esc(t('budget.csvExport'))}</span>
+      </a>`);
+  }
+  if (!items.length) return '';
+  const label = t('common.moreActions');
+  return `
+    <button type="button" class="btn btn--secondary btn--icon budget-list-tools popover-menu__trigger"
+            popovertarget="budget-list-tools-menu" aria-haspopup="menu" aria-expanded="false"
+            aria-label="${esc(label)}" title="${esc(label)}">
+      <i data-lucide="ellipsis" class="icon-md" aria-hidden="true"></i>
+    </button>
+    <div class="popover-menu budget-list-tools-menu" id="budget-list-tools-menu" popover role="menu" aria-label="${esc(label)}">
+      ${items.join('')}
+    </div>`;
 }
 
 function renderCategoryBars(byCategory) {
-  const maxAbs = Math.max(...byCategory.map((c) => Math.abs(c.total)), 1);
+  const blocks = categoryBlocks(byCategory);
+  const leadKind = chartLeadKind(blocks);
 
-  return byCategory.map((c) => {
-    const isExpense = c.total < 0;
-    /* DER ANTEIL IST DER ANTEIL. Hier stand `Math.max(6, Math.round(rawPct))`.
-     * Der Boden war selbst einmal ein Audit-Fix (P3): eine winzige Kategorie
-     * sollte neben einer grossen nicht auf 0 runden und leer wirken. Er hat das
-     * Kosmetikproblem geloest und eine Falschaussage eingefuehrt - gemessen bei
-     * 1440px rendern -234,98 €, -157,50 €, -153,49 € und -25,00 € ALLE VIER
-     * exakt 25,9px, obwohl zwischen erstem und letztem das 9,4-Fache liegt
-     * (Critique 2026-08-13). Der einzige Zweck eines Balkens neben einer Zahl
-     * ist der Vergleich auf einen Blick, und in einem Geldmodul.
-     * Sichtbar bleibt der Zwerg trotzdem: der Mindestbalken ist jetzt eine
-     * LAENGE im CSS (`--bar-visible` schaltet ihn), kein Anteil - 2px stehen
-     * fuer "da ist etwas", ohne 25 € wie 235 € aussehen zu lassen. */
-    const scale     = Math.abs(c.total) / maxAbs;
-    const cls       = isExpense ? 'budget-bar-row__fill--expenses' : 'budget-bar-row__fill--income';
-
-    // --mirrored (Critique 2026-08-10, P0): Einnahmen und Ausgaben wuchsen von
-    // derselben Nulllinie in dieselbe Richtung, die Richtung steckte allein im
-    // Farbton. Jetzt spiegeln beide um eine gemeinsame Mittelachse.
+  return CHART_BLOCKS.filter(({ kind }) => blocks[kind].length).map(({ kind, labelKey }) => {
+    const rows = blocks[kind];
+    // DAS EIGENE MAXIMUM DES BLOCKS (siehe categoryBlocks).
+    const max = Math.max(...rows.map((r) => Math.abs(r.amount)), 1);
+    const titleId = `budget-chart-${kind}-title`;
+    const lead = kind === leadKind;
     return `
-      <div class="budget-bar-row budget-bar-row--mirrored">
-        <div class="budget-bar-row__label" title="${esc(categoryLabel(c.category))}">${esc(categoryLabel(c.category))}</div>
-        <div class="budget-bar-row__track">
-          <div class="budget-bar-row__fill ${cls}" style="--bar-scale:${scale.toFixed(4)};--bar-visible:${c.total !== 0 ? 1 : 0}"></div>
+      <section class="budget-chart-block budget-chart-block--${kind}${lead ? ' budget-chart-block--lead' : ''}" aria-labelledby="${titleId}">
+        <h3 class="budget-chart-block__title" id="${titleId}">
+          <span>${esc(t(labelKey))}</span>
+          <span class="budget-chart-block__total">${amountByRole(blockTotal(rows), 'flow').text}</span>
+        </h3>
+        <div class="budget-chart-block__rows">
+          ${rows.map((r, i) => {
+            /* DER ANTEIL IST DER ANTEIL. Hier stand einmal
+             * `Math.max(6, Math.round(rawPct))`: ein Boden gegen „wirkt leer",
+             * der vier Kategorien mit dem 9,4-Fachen Abstand gleich lang
+             * zeichnete (Critique 2026-08-13). Sichtbar bleibt der Zwerg als
+             * LAENGE im CSS (der Stummel am Bahnanfang), nicht als Anteil. */
+            const scale = Math.abs(r.amount) / max;
+            const label = esc(categoryLabel(r.category));
+            return `
+            <div class="budget-bar-row${lead && i < CHART_LEAD ? ' budget-bar-row--lead' : ''}">
+              <div class="budget-bar-row__label" title="${label}">${label}</div>
+              <div class="budget-bar-row__track" style="--bar-visible:${r.amount !== 0 ? 1 : 0}">
+                <div class="budget-bar-row__fill budget-bar-row__fill--${kind}" style="--bar-scale:${scale.toFixed(4)}"></div>
+              </div>
+              <div class="budget-bar-row__amount">${amountByRole(r.amount, 'flow').text}</div>
+            </div>`;
+          }).join('')}
         </div>
-        <div class="budget-bar-row__amount" style="color:${isExpense ? 'var(--color-danger)' : 'var(--color-success)'};">
-          ${isExpense ? '' : '+'}${formatAmount(c.total)}
-        </div>
-      </div>
-    `;
+      </section>`;
   }).join('');
 }
 
@@ -1262,17 +1719,30 @@ function visibleEntries() {
 }
 
 function renderEntries() {
+  if (state.ledgerQuery && state.ledgerResults) {
+    if (state.ledgerError) {
+      return emptyStateHTML({ icon: 'cloud-off', title: t('budget.ledgerSearchError') });
+    }
+    if (!state.ledgerResults.length) {
+      return emptyStateHTML({ icon: 'search-x', title: t('budget.ledgerSearchEmpty', { query: state.ledgerQuery }) });
+    }
+    // Treffer aus vielen Monaten: die Zeile nennt das volle Datum.
+    return entryRows(state.ledgerResults, { fullDate: true });
+  }
   if (!state.entries.length) {
     // BEI `budget: read` BLEIBT NUR DER TITEL. Beschreibung und Hinweis sind
     // Anleitungen zum Anlegen („ueber den + Button"), und der CTA klickt den
     // FAB per `.click()` - das erreicht auch ein Element mit `display: none`.
     // „Keine Eintraege diesen Monat" ist die Auskunft; der Rest fuehrte ins 403.
+    //
+    // EIN SATZ UND DER WEG (Critique 2026-09-25): Titel, Beschreibung („ueber
+    // den + Button") und Hinweis sagten dreimal dasselbe, und der mittlere
+    // verwies auf ein Bedienelement, das auf dem Desktop anders aussieht und
+    // unter dem Satz ohnehin als Knopf steht.
     const ro = readOnly();
     return emptyStateHTML({
       icon: 'dollar-sign',
       title: t('budget.emptyTitle'),
-      description: ro ? '' : t('budget.emptyDescription'),
-      hint: ro ? '' : t('emptyHint.budget'),
       action: ro ? null : { label: t('budget.emptyAction'), icon: 'plus', attrs: { id: 'empty-cta-budget' } },
     });
   }
@@ -1324,8 +1794,11 @@ function statementCreditLimitHtml() {
 }
 
 /** Die Buchungszeilen selbst - einmal gebaut, von Liste und Gruppen benutzt. */
-function entryRows(list) {
+function entryRows(list, { fullDate = false } = {}) {
   const ro = readOnly();
+  // In einem Prognose-Monat liegt JEDE Zeile nach heute - dort sagt es der
+  // Titel der Bilanz, und ein Symbol in jeder Metazeile waere Wiederholung.
+  const markUpcoming = !isForecastMonth(state.month);
   return list.map((e) => {
     const isIncome  = e.amount > 0;
     const amtClass  = isIncome ? 'budget-entry__amount--income' : 'budget-entry__amount--expenses';
@@ -1348,7 +1821,7 @@ function entryRows(list) {
      *
      * `formatEntryDate` bleibt, wie es ist: die Darlehensraten weiter unten
      * stehen in KEINER Monatsansicht, dort trägt die Zeile das volle Datum. */
-    const date      = formatDayMonth(e.date);
+    const date      = fullDate ? formatEntryDate(e.date) : formatDayMonth(e.date);
     const recurTag  = e.is_recurring
       ? ` <span class="budget-recur-mark" role="img" aria-label="${t('budget.recurringLabel')}"><i data-lucide="repeat" class="icon-sm" aria-hidden="true"></i></span>${e.recurrence_virtual ? ' ' + t('budget.virtualBudgetBadge') : ''}`
       : (e.recurrence_parent_id ? ` <span class="budget-recur-mark" role="img" aria-label="${t('budget.recurringInstanceLabel')}"><i data-lucide="corner-down-left" class="icon-sm" aria-hidden="true"></i></span>` : '');
@@ -1395,6 +1868,15 @@ function entryRows(list) {
     // sie zaehlt in keiner Summe mit, und das muss die Zeile sagen, sonst wirkt
     // die Monatsuebersicht falsch.
     const pending = !!e.is_pending;
+    /* NOCH NICHT PASSIERT (Critique 2026-09-25): eine gebuchte Zeile mit einem
+     * Datum nach heute - meist eine Serie, die der Server fuer den Monat schon
+     * angelegt hat. Sie zaehlt in den Summen (anders als eine erwartete
+     * Buchung), ist aber keine Tatsache. Der Punkt wird zum Ring, und im
+     * laufenden Monat sagt ein Symbol mit Namen, was der Ring bedeutet. */
+    const upcoming = isUpcomingEntry(e);
+    const upcomingMark = upcoming && markUpcoming
+      ? ` <span class="budget-recur-mark" role="img" aria-label="${esc(t('budget.upcomingLabel'))}"><i data-lucide="calendar-clock" class="icon-sm" aria-hidden="true"></i></span>`
+      : '';
     const pendingBadge = pending
       ? ` <span class="budget-badge budget-badge--pending">${esc(t('budget.pendingBadge'))}</span>`
       : '';
@@ -1432,18 +1914,19 @@ function entryRows(list) {
              aria-label="${esc(t('budget.responsibleFilterTo', { name: e.responsible_users[0].display_name ?? '' }))}"
            >${renderAvatarStack(e.responsible_users, { size: 16, maxVisible: 3 })}</button>`
       : '';
+    // EINE ZEILENBEDIENUNG (R14 P8, A5 P2-6): die Zeile oeffnet die Buchung,
+    // Loeschen steht in deren Blatt (#bm-delete) - an der Zeile bleibt nur die
+    // Folgeaktion „Verbuchen". Der dauerhafte Papierkorb neben dem Betrag war
+    // eine von drei Bedienungen im Modul und kappte den Titel.
     const rowActions = (masked || ro) ? '' : `
-          ${confirmBtn}
-          <button class="row-action row-action--danger" data-action="delete" data-id="${e.id}" aria-label="${t('budget.deleteLabel')}">
-            <i data-lucide="trash-2" class="icon-md" aria-hidden="true"></i>
-          </button>`;
+          ${confirmBtn}`;
 
     return `
-      <div class="list-row budget-entry${pending ? ' budget-entry--pending' : ''}${masked ? ' budget-entry--masked' : ''}" ${rowInteraction}>
+      <div class="list-row budget-entry${pending ? ' budget-entry--pending' : ''}${upcoming ? ' budget-entry--upcoming' : ''}${masked ? ' budget-entry--masked' : ''}" ${rowInteraction}>
         <div class="budget-entry__indicator ${indClass}"></div>
         <div class="list-row__main">
           ${titleCell}
-          <div class="list-row__meta budget-entry__meta">${date} · ${esc(categoryMeta)}${acctMeta}${recurTag}${receiptMark}${responsibleMark}</div>
+          <div class="list-row__meta budget-entry__meta">${date}${upcomingMark} · ${esc(categoryMeta)}${acctMeta}${recurTag}${receiptMark}${responsibleMark}</div>
         </div>
         <div class="budget-entry__amount ${amtClass}">${amountText}</div>
         <div class="list-row__actions">${rowActions}
@@ -1474,16 +1957,20 @@ function renderAccountsPage() {
   // Kopfleiste = Aktionen, Kennzahl = Karte in der geteilten Kennzahl-Zeile.
   // Vorher stand das Nettovermögen als Label-plus-Wert direkt im Kopf und war
   // damit die vierte Kartenbauart des Moduls (Critique 2026-07-30, P0).
+  // Der Titel ist ein <h2> fuer die Gliederung, aber UNSICHTBAR: sichtbar
+  // wiederholte er nur den gewaehlten Tab „Konten" - als 12px-Versal-Label
+  // zugleich die zweite Ueberschriftsgrammatik des Moduls (Critique 2026-09-25).
+  // Angelegt wird ueber den Kopfknopf (TAB_CAPS.accounts.add) - ein zweiter,
+  // dauerhafter „Konto hinzufuegen"-Knopf hier war ein zweiter Weg fuer dieselbe
+  // Handlung. Nur der Leerzustand traegt ihn noch, als Aufforderung (CTA).
+  // Ohne Archiv-Umschalter bleibt keine sichtbare Aktion - die Kopfleiste
+  // faellt dann weg, sonst stuende ihr Abstand als 16px-Luecke ueber der Kennzahl.
+  const title = `<h2 class="panel-head__title sr-only">${t('budget.accountsTab')}</h2>`;
   const header = `
-    <div class="panel-head">
-      <span class="panel-head__title">${t('budget.accountsTab')}</span>
-      <div class="panel-head__actions">
-        ${archiveToggle}
-        ${ro ? '' : `<button class="btn btn--secondary" id="budget-add-account" type="button">
-          <i data-lucide="plus" class="icon-sm" aria-hidden="true"></i>${t('budget.addAccount')}
-        </button>`}
-      </div>
-    </div>
+    ${archiveToggle ? `<div class="panel-head">
+      ${title}
+      <div class="panel-head__actions">${archiveToggle}</div>
+    </div>` : title}
     <div class="metric-grid">
       <div class="metric-card ${netWorth.className}">
         <div class="metric-card__label">${t('budget.netWorth')}</div>
@@ -1533,9 +2020,9 @@ function renderAccountsPage() {
             <span class="budget-account__starting">${t('budget.startingBalanceShort')} ${formatAmount(a.starting_balance)}</span>
           </span>
         </button>
-        ${ro ? '' : `<button class="budget-account__edit" type="button" data-edit="${a.id}" aria-label="${t('budget.editAccount')}">
-          <i data-lucide="pencil" class="icon-sm" aria-hidden="true"></i>
-        </button>`}
+        ${ro ? '' : `<div class="row-actions budget-account__actions">${rowActionHtml({
+          icon: 'pencil', label: t('common.editNamed', { name: a.name }), attrs: { 'data-edit': a.id },
+        })}</div>`}
       </div>`;
   }).join('');
 
@@ -1547,7 +2034,6 @@ function renderAccountsPage() {
 }
 
 function wireAccountsPage() {
-  _container.querySelector('#budget-add-account')?.addEventListener('click', () => openAccountModal());
   _container.querySelector('#budget-add-account-empty')?.addEventListener('click', () => openAccountModal());
   _container.querySelector('#budget-toggle-archived')?.addEventListener('click', () => {
     state.accountsShowArchived = !state.accountsShowArchived;
@@ -1561,6 +2047,7 @@ function wireAccountsPage() {
       // Aktive Pille mitziehen: dieser Wechsel läuft nicht über die Tab-Leiste,
       // daher malt wireTablist ihn nur über sync() nach (updateTabs tut es nicht mehr).
       _tablist?.sync('budget');
+      writeTabToUrl('budget');
       await loadMonth(state.month);
       renderBody();
       // Der geklickte Button wird beim Re-Render entfernt — ohne Fokus-Umzug
@@ -1569,7 +2056,7 @@ function wireAccountsPage() {
       _container.querySelector('#budget-body')?.focus();
     });
   });
-  _container.querySelectorAll('.budget-account__edit[data-edit]').forEach((el) => {
+  _container.querySelectorAll('.budget-account [data-edit]').forEach((el) => {
     el.addEventListener('click', () => {
       const account = state.accounts.find((a) => a.id === parseInt(el.dataset.edit, 10));
       if (account) openAccountModal(account);
@@ -1644,9 +2131,9 @@ function openAccountModal(account = null) {
     </div>
 
     <div class="modal-panel__footer modal-panel__footer--plain">
-      <div style="display:flex;gap:var(--space-2)">
-      ${isEdit ? `<button class="btn btn--danger btn--icon" id="am-delete" aria-label="${t('budget.deleteAccount')}">
-        <i data-lucide="trash-2" class="icon-md" aria-hidden="true"></i>
+      <div style="display:flex;gap:var(--space-2);margin-inline-end:auto">
+      ${isEdit ? `<button type="button" class="btn btn--danger-outline" id="am-delete">
+        <i data-lucide="trash-2" class="icon-md" aria-hidden="true"></i>${t('common.delete')}
       </button>
       <button class="btn btn--secondary btn--icon" id="am-archive"
               aria-label="${account.archived ? t('budget.unarchiveAccount') : t('budget.archiveAccount')}"
@@ -1779,15 +2266,26 @@ function renderLoansDashboard() {
   const summary = state.loans?.summary ?? {};
   const visibleLoans = filteredLoans();
 
+  const remainingLabel = t(summary.has_interest ? 'budget.loanRemainingPrincipal' : 'budget.loanRemainingAmount');
   return `
     <section class="budget-loans">
+      ${metricGlanceHtml({
+    id: 'budget-loans-more',
+    controls: 'budget-loans-details',
+    expanded: state.loansExpanded,
+    label: remainingLabel,
+    value: amountByRole(summary.remaining_principal ?? summary.remaining_amount ?? 0, 'total').text,
+    flows: [
+      { label: t('budget.loanRemainingInstallments'), amount: String(summary.remaining_installments ?? 0) },
+      { label: t('budget.loanPaidAmount'), amount: amountByRole(summary.paid_amount ?? 0, 'total').text },
+    ],
+  })}
       <div class="panel-head budget-loans__header">
         <div>
-          <div class="panel-head__title">${t('budget.loansTitle')}</div>
-          <div class="budget-loans__summary">${t('budget.loansSummary', {
-            count: summary.active_count ?? 0,
-            amount: formatAmount(summary.remaining_principal ?? summary.remaining_amount ?? 0),
-          })}</div>
+          <!-- Unsichtbar wie bei den Konten: sichtbar wiederholte der Titel nur den Tab. -->
+          <h2 class="panel-head__title sr-only">${t('budget.loansTitle')}</h2>
+          <!-- Die Summenzeile („2 aktiv · 175.444,93 € offen") ist entfallen:
+               sie wiederholte die Karte RESTSCHULD direkt darunter (R14 P1). -->
           ${state.loanFilterId ? `<div class="budget-list-header__filter">${esc(activeLoanLabel())}</div>` : ''}
         </div>
         <div class="panel-head__actions">
@@ -1811,10 +2309,11 @@ function renderLoansDashboard() {
       </div>
       <!-- Geteilte Kennzahl-Zeile statt der früheren eigenen budget-loans__stats
            (fünfte Kartenbauart des Moduls, Critique 2026-07-30, P0). Rolle
-           total: die Richtung steht im Label, nicht im Vorzeichen. -->
-      <div class="metric-grid">
+           total: die Richtung steht im Label, nicht im Vorzeichen.
+           Mobil wartet sie hinter EINER Zeile (metricGlanceHtml, R14 P1). -->
+      <div class="metric-grid budget-glance-details${state.loansExpanded ? ' is-expanded' : ''}" id="budget-loans-details">
         <div class="metric-card">
-          <div class="metric-card__label">${t(summary.has_interest ? 'budget.loanRemainingPrincipal' : 'budget.loanRemainingAmount')}</div>
+          <div class="metric-card__label">${remainingLabel}</div>
           <div class="metric-card__value">${amountByRole(summary.remaining_principal ?? summary.remaining_amount ?? 0, 'total').text}</div>
         </div>
         <div class="metric-card">
@@ -1866,7 +2365,9 @@ function renderLoanTransactions(loans) {
 
   return `<div class="budget-loan-transactions">
     <div class="budget-loan-transactions__title">${t('budget.loanTransactions')}</div>
-    <div class="budget-loan-transactions__list">
+    ${/* Traeger wie das Hauptbuch (Re-Critique 2026-09-28 P1-1): vorher lagen
+        * die Raten nackt auf der Buehne, der einzige Tab ohne Flaeche. */ ''}
+    <div class="row-carrier budget-loan-transactions__list">
       ${payments.map(({ loan, ...payment }) => renderLoanPaymentEntry(loan, payment)).join('')}
     </div>
   </div>`;
@@ -1909,10 +2410,15 @@ function loanPaymentToEntry(loan, payment) {
 
 function renderLoanPaymentEntry(loan, payment) {
   const entry = loanPaymentToEntry(loan, payment);
-  const meta = `${formatEntryDate(payment.paid_date)} · ${esc(loan.title)} · ${t('budget.loanInstallmentNumber', {
+  const installment = t('budget.loanInstallmentNumber', {
     number: payment.installment_number,
     total: loan.installment_count,
-  })}`;
+  });
+  const meta = `${formatEntryDate(payment.paid_date)} · ${esc(loan.title)} · ${installment}`;
+  const rowTitle = payment.entry_title || t('budget.loanPaymentTitle', { borrower: loan.borrower });
+  // Alle Raten tragen denselben Titel - der Name des Loeschknopfs nennt die Rate mit.
+  const deleteName = t('budget.deleteLabel', { title: `${rowTitle} · ${installment}` });
+  const editName = t('common.editNamed', { name: `${rowTitle} · ${installment}` });
   const borrowed = isBorrowedLoan(loan);
   const flow = borrowed ? 'expenses' : 'income';
   // Rolle `flow` wie in der Einträge-Liste: das Vorzeichen kommt aus dem Zahlformat,
@@ -1927,16 +2433,16 @@ function renderLoanPaymentEntry(loan, payment) {
     <div class="list-row budget-entry budget-entry--loan" data-loan-payment-id="${payment.id}" data-loan-id="${loan.id}" ${entry ? `data-entry-id="${entry.id}"` : ''}>
       <div class="budget-entry__indicator budget-entry__indicator--${flow}"></div>
       <div class="list-row__main">
-        <div class="list-row__name budget-entry__title">${esc(payment.entry_title || t('budget.loanPaymentTitle', { borrower: loan.borrower }))}</div>
+        <div class="list-row__name budget-entry__title">${esc(rowTitle)}</div>
         <div class="list-row__meta budget-entry__meta">${meta}</div>
       </div>
       <div class="budget-entry__amount budget-entry__amount--${flow}">${amountText}</div>
       ${readOnly() ? '' : `<div class="list-row__actions">
         ${entry ? `
-        <button class="row-action" data-action="loan-payment-edit" data-loan-id="${loan.id}" data-payment-id="${payment.id}" data-entry-id="${entry.id}" aria-label="${t('common.edit')}">
+        <button type="button" class="row-action" data-action="loan-payment-edit" data-loan-id="${loan.id}" data-payment-id="${payment.id}" data-entry-id="${entry.id}" aria-label="${esc(editName)}">
           <i data-lucide="pencil" class="icon-md" aria-hidden="true"></i>
         </button>` : ''}
-        <button class="row-action row-action--danger" data-action="loan-payment-delete" data-loan-id="${loan.id}" data-payment-id="${payment.id}" data-entry-id="${entry?.id ?? ''}" aria-label="${t('budget.deleteLabel')}">
+        <button type="button" class="row-action row-action--danger" data-action="loan-payment-delete" data-loan-id="${loan.id}" data-payment-id="${payment.id}" data-entry-id="${entry?.id ?? ''}" aria-label="${esc(deleteName)}">
           <i data-lucide="trash-2" class="icon-md" aria-hidden="true"></i>
         </button>
       </div>`}
@@ -1947,12 +2453,13 @@ function renderLoanPaymentEntry(loan, payment) {
 function renderLoansPage() {
   const loans = state.loans?.loans ?? [];
   if (!loans.length) {
+    // Ohne Beschreibung: sie schickte „ueber die +-Schaltflaeche" zu einem
+    // Weg, den der Knopf darunter selbst ist (Critique 2026-09-25).
     const ro = readOnly();
     return `<div class="budget-tab-panel page-scrollport budget-tab-panel--loans">
       ${emptyStateHTML({
     icon: 'hand-coins',
     title: t('budget.loansEmpty'),
-    description: ro ? '' : t('budget.loansEmptyDescription'),
     action: ro ? null : { label: t('budget.newLoan'), icon: 'plus', attrs: { id: 'budget-empty-loan' } },
   })}
     </div>`;
@@ -1963,7 +2470,34 @@ function renderLoansPage() {
   </div>`;
 }
 
+/**
+ * Oeffnet den Bericht eines Darlehens - ueber den Titelknopf (Tastatur,
+ * Screenreader) und ueber die Kartenflaeche (Zeiger). Bearbeiten und Loeschen
+ * stehen allein im Bericht (R14 P8); ohne den Knopf kam die Tastatur nie
+ * dorthin (Re-Critique 2026-09-28 R15 A5 P1-1, WCAG 2.1.1).
+ * @param {ParentNode} root
+ * @param {(loan: object) => void} [open]
+ */
+function wireLoanCards(root, open = openLoanReport) {
+  const openById = (id) => {
+    const loan = state.loans?.loans?.find((item) => item.id === parseInt(id, 10));
+    if (loan) open(loan);
+  };
+  root.querySelectorAll('.budget-loan-card__open[data-loan-id]').forEach((btn) => {
+    btn.addEventListener('click', () => openById(btn.dataset.loanId));
+  });
+  root.querySelectorAll('.budget-loan-card[data-loan-id]').forEach((card) => {
+    card.addEventListener('click', (event) => {
+      // Knoepfe tragen ihre eigene Handlung - der Titelknopf oeffnet schon
+      // selbst, "Rate buchen" und der Filter sollen den Bericht nicht mitoeffnen.
+      if (event.target.closest('button, a')) return;
+      openById(card.dataset.loanId);
+    });
+  });
+}
+
 function wireLoansPage() {
+  wireMetricGlance(_container, 'budget-loans-more', (on) => { state.loansExpanded = on; });
   _container.querySelector('#budget-empty-loan')?.addEventListener('click', () => openBudgetModal({ mode: 'create', initialType: 'loan' }));
   _container.querySelector('#budget-clear-loan-filter')?.addEventListener('click', () => {
     state.loanFilterId = null;
@@ -1981,27 +2515,14 @@ function wireLoansPage() {
       refocusSegmented('.budget-loans__filters');
     },
   });
-  _container.querySelectorAll('.budget-loan-card[data-loan-id]').forEach((card) => {
-    card.addEventListener('click', (event) => {
-      if (event.target.closest('button, a')) return;
-      const loan = state.loans.loans.find((item) => item.id === parseInt(card.dataset.loanId, 10));
-      if (loan) openLoanReport(loan);
-    });
-  });
+  // renderBody() baut die Leiste bei jedem Wechsel neu: der Schluessel laesst
+  // die neue Kapsel von der Stelle der alten gleiten.
+  const loanFilters = _container.querySelector('.budget-loans__filters');
+  if (loanFilters) attachSegmentIndicator(loanFilters, { key: 'budget-loan-filter' });
+  wireLoanCards(_container);
   _container.querySelectorAll('[data-action="loan-pay"]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       await markLoanPayment(parseInt(btn.dataset.id, 10));
-    });
-  });
-  _container.querySelectorAll('[data-action="loan-edit"]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const loan = state.loans.loans.find((item) => item.id === parseInt(btn.dataset.id, 10));
-      if (loan) openLoanModal(loan);
-    });
-  });
-  _container.querySelectorAll('[data-action="loan-delete"]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      await deleteLoan(parseInt(btn.dataset.id, 10));
     });
   });
   _container.querySelectorAll('[data-action="loan-filter"]').forEach((btn) => {
@@ -2119,10 +2640,17 @@ function openLoanReport(loan) {
         </div>
       ` : `<div class="budget-loans__empty">${t('budget.loanNoTransactions')}</div>`}
     </div>
-    <div class="modal-panel__footer modal-panel__footer--plain">
+    ${readOnly() ? `<div class="modal-panel__footer modal-panel__footer--plain">
       <div></div>
       <button class="btn btn--primary" id="loan-report-close">${t('common.close')}</button>
-    </div>`;
+    </div>` : `<div class="modal-panel__footer">
+      <button type="button" class="btn btn--danger-outline" id="loan-report-delete"
+              aria-label="${esc(t('common.deleteNamed', { name: loan.title }))}" style="margin-inline-end:auto">
+        <i data-lucide="trash-2" class="icon-md" aria-hidden="true"></i><span>${esc(t('common.delete'))}</span>
+      </button>
+      <button type="button" class="btn btn--secondary" id="loan-report-close">${t('common.close')}</button>
+      <button type="button" class="btn btn--primary" id="loan-report-edit">${esc(t('common.edit'))}</button>
+    </div>`}`;
 
   openSharedModal({
     title: t('budget.loanReportTitle'),
@@ -2130,6 +2658,18 @@ function openLoanReport(loan) {
     size: 'md',
     onSave(panel) {
       panel.querySelector('#loan-report-close')?.addEventListener('click', closeModal);
+      // EINE ZEILENBEDIENUNG (R14 P8): Bearbeiten und Loeschen wohnen hier,
+      // nicht mehr an der Karte. Bearbeiten ersetzt das Blatt; Loeschen fragt
+      // wie bisher (deleteLoan) und schliesst den Bericht vorher.
+      panel.querySelector('#loan-report-edit')?.addEventListener('click', () => {
+        closeModal({ force: true });
+        openLoanModal(loan);
+      });
+      panel.querySelector('#loan-report-delete')?.addEventListener('click', async () => {
+        closeModal({ force: true });
+        await deleteLoan(loan.id);
+        refocusAfterRender();
+      });
     },
   });
 }
@@ -2207,12 +2747,17 @@ function renderLoanCard(loan) {
     <article class="budget-loan-card" data-loan-id="${loan.id}">
       <div class="budget-loan-card__main">
         <div class="budget-loan-card__title-row">
-          <div class="budget-loan-card__title">${esc(loan.title)}</div>
-          <button class="budget-loan-card__filter ${state.loanFilterId === loan.id ? 'budget-loan-card__filter--active' : ''}"
-                  type="button" data-action="loan-filter" data-id="${loan.id}"
-                  aria-pressed="${state.loanFilterId === loan.id}" aria-label="${t('budget.filterLoanTransactions')}">
-            <i data-lucide="filter" aria-hidden="true"></i>
+          ${/* Der Titel IST der Weg in den Bericht (Muster budget-account__main):
+              * ein echter Knopf, damit Tastatur und Screenreader ihn erreichen. */ ''}
+          <button type="button" class="budget-loan-card__open" data-loan-id="${loan.id}" aria-haspopup="dialog">
+            <span class="budget-loan-card__title">${esc(loan.title)}</span>
+            <i data-lucide="chevron-right" class="budget-loan-card__chevron icon-sm" aria-hidden="true"></i>
           </button>
+          ${rowActionHtml({
+    icon: 'filter', action: 'loan-filter', className: 'budget-loan-card__filter',
+    label: t('budget.filterLoanNamed', { name: loan.title }),
+    attrs: { 'data-id': loan.id, 'aria-pressed': String(state.loanFilterId === loan.id) },
+  })}
         </div>
         <div class="budget-loan-card__meta">${t(isBorrowedLoan(loan)
           ? 'budget.loanDirectionBorrowedBadge'
@@ -2240,14 +2785,14 @@ function renderLoanCard(loan) {
         ${/* Bei `budget: read` gehen alle drei: Bearbeiten, Loeschen und das
             * Buchen einer Rate schreiben. Faelligkeit, Fortschritt und der
             * Bericht hinter der Karte bleiben - sie sind die Auskunft. */ ''}
+        ${/* EINE ZEILENBEDIENUNG (R14 P8): Bearbeiten und Loeschen stehen im
+            * Bericht, den die Karte oeffnet (openLoanReport) - an der Karte
+            * bleibt nur „Rate buchen". */ ''}
         ${readOnly() ? '' : `<div class="budget-loan-card__actions">
-          <button class="btn btn--secondary btn--icon" data-action="loan-edit" data-id="${loan.id}" aria-label="${t('budget.editLoan')}">
-            <i data-lucide="pencil" aria-hidden="true"></i>
-          </button>
-          <button class="btn btn--secondary btn--icon" data-action="loan-delete" data-id="${loan.id}" aria-label="${t('budget.deleteLoan')}">
-            <i data-lucide="trash-2" aria-hidden="true"></i>
-          </button>
-          <button class="btn btn--primary" data-action="loan-pay" data-id="${loan.id}" ${payDisabled}>
+          ${/* Sekundaer, nicht primaer (Critique 2026-09-25): drei Darlehen
+              * zeigten drei violette Primaerknoepfe nebeneinander, und keiner
+              * war der Weg der Seite. Der steht im Kopf („+ Darlehen"). */ ''}
+          <button class="btn btn--secondary" data-action="loan-pay" data-id="${loan.id}" ${payDisabled}>
             ${t('budget.markLoanPaid')}
           </button>
         </div>`}
@@ -2485,6 +3030,7 @@ function openBudgetModal({ mode, entry = null, initialType = '' }) {
   // damit die Zuordnung ablesbar ist, nimmt hier aber keine Eingabe entgegen - der
   // Server bucht ohnehin nach der Richtung und würde eine Umkehr still zurückdrehen.
   const isLoanPayment = isEdit && (entry.loan_payment_id != null || entry.loan_id != null);
+  const initialTypeId = !isEdit && initialType === 'loan' ? 'loan' : (isExpense ? 'expense' : 'income');
   // Bei virtuellen Serien hält amount nur den Monatsanteil; im Formular den eingegebenen Periodenbetrag zeigen.
   const editAmount = isEdit && entry.recurrence_virtual && entry.recurrence_full_amount != null
     ? entry.recurrence_full_amount
@@ -2501,15 +3047,23 @@ function openBudgetModal({ mode, entry = null, initialType = '' }) {
   const intervalOption = (val, key) =>
     `<option value="${val}" ${curInterval === val ? 'selected' : ''}>${t(key)}</option>`;
 
+  // KEINE VORBELEGTE KATEGORIE (Re-Critique 2026-09-27, A5 P2-4). Die erste
+  // Kategorie stand vorgewaehlt - "Wohnen / Zuhause" mit "Miete / Kreditrate":
+  // wer nur Betrag und "REWE" tippte, buchte still Miete. Neu steht die Auswahl
+  // auf einem leeren Platzhalter, und Speichern verlangt eine Wahl. Beim
+  // Bearbeiten bleibt die Kategorie des Bestands gewaehlt.
   const initialCats = isExpense ? expenseCategories() : incomeCategories();
-  const catOpts     = initialCats.map((c) =>
-    `<option value="${esc(c.key)}" ${isEdit && entry.category === c.key ? 'selected' : ''}>${esc(categoryLabel(c))}</option>`
+  // Eine Bestandskategorie, die es nicht mehr gibt, faellt ebenfalls auf den
+  // Platzhalter - sonst waehlte der Browser still die erste Option.
+  const initialCategory = isEdit && initialCats.some((c) => c.key === entry.category) ? entry.category : '';
+  const catOpts     = categoryPlaceholderOption(!initialCategory) + initialCats.map((c) =>
+    `<option value="${esc(c.key)}" ${initialCategory === c.key ? 'selected' : ''}>${esc(categoryLabel(c))}</option>`
   ).join('');
-  const initialCategory = isEdit ? entry.category : initialCats[0]?.key;
-  const initialSubcategory = isEdit ? entry.subcategory : defaultSubcategory(initialCategory);
-  const subcatOpts = getSubcategories(initialCategory).map((s) =>
-    `<option value="${esc(s.key)}" ${initialSubcategory === s.key ? 'selected' : ''}>${esc(subcategoryLabel(s))}</option>`
-  ).join('');
+  const initialSub = subcategoryChoice(initialCategory, isEdit ? entry.subcategory : '');
+  const subcatOpts = (initialSub.placeholder ? subcategoryPlaceholderOption(!initialSub.value) : '')
+    + getSubcategories(initialCategory).map((s) =>
+      `<option value="${esc(s.key)}" ${initialSub.value === s.key ? 'selected' : ''}>${esc(subcategoryLabel(s))}</option>`
+    ).join('');
 
   const hasAccounts = (state.accounts?.length ?? 0) > 0;
   const accountOpts = `<option value="">${t('budget.noAccount')}</option>` + (state.accounts ?? []).map((a) =>
@@ -2522,15 +3076,41 @@ function openBudgetModal({ mode, entry = null, initialType = '' }) {
         </div>` : '';
 
   const content = `
-    <div class="amount-type-toggle ${isEdit ? 'amount-type-toggle--entry-only' : ''}">
-      <button class="amount-type-btn amount-type-btn--expenses ${isExpense ? 'amount-type-btn--active' : ''}"
-              id="type-expense" type="button" ${isLoanPayment ? 'disabled' : ''}>${t('budget.typeExpense')}</button>
-      <button class="amount-type-btn amount-type-btn--income ${!isExpense ? 'amount-type-btn--active' : ''}"
-              id="type-income" type="button" ${isLoanPayment ? 'disabled' : ''}>${t('budget.typeIncome')}</button>
-      ${!isEdit ? `<button class="amount-type-btn amount-type-btn--loan"
-              id="type-loan" type="button">${t('budget.typeLoan')}</button>` : ''}
+    ${/* BUCHUNGSTYP ALS KANON-SEGMENT (Re-Critique 2026-09-27, A5 P1-1). Drei
+        * Knoepfe ohne Rolle und ohne Zustand, das Vorzeichen stand nur in der
+        * Farbe einer roten Vollflaeche - fuer Screenreader unsichtbar, fuer
+        * alle anderen ein Alarm. Jetzt `.segmented` mit radiogroup, der Zustand
+        * steht in aria-checked und als Pille im Well (Form, nicht Farbe);
+        * Pfeiltasten, Roving-Tabindex und die gleitende Kapsel kommen aus den
+        * geteilten Bausteinen (onSave: wireTablist + attachSegmentIndicator). */ ''}
+    <div class="segmented budget-type-toggle" role="radiogroup" aria-label="${t('budget.typeGroupLabel')}">
+      ${[
+        ['expense', 'budget.typeExpense'],
+        ['income', 'budget.typeIncome'],
+        ...(isEdit ? [] : [['loan', 'budget.typeLoan']]),
+      ].map(([id, key]) => {
+        const on = id === initialTypeId;
+        return `<button class="segmented__item${on ? ' is-active' : ''}" id="type-${id}" type="button" role="radio"
+              data-tab-id="${id}" aria-checked="${on}" tabindex="${on ? '0' : '-1'}" ${isLoanPayment ? 'disabled' : ''}>${t(key)}</button>`;
+      }).join('')}
     </div>
     ${isLoanPayment ? `<p class="budget-type-locked-hint">${t('budget.loanPaymentTypeLocked')}</p>` : ''}
+
+    ${/* REIHENFOLGE NACH HAEUFIGKEIT (Critique 2026-09-25). Zehn Felder
+        * standen sofort offen, 36 % unter dem Falz, und der Fokus begann beim
+        * Titel. Eine Buchung beginnt mit dem Betrag - er steht zuerst, gross
+        * und mit Ziffern gleicher Breite, und bekommt den Erstfokus (das erste
+        * Feld des Dialogs, components/modal.js). Dann Titel, Kategorie, Datum.
+        * Was selten gesetzt wird (Konto, Sichtbarkeit, Zustaendige, Serie,
+        * Belege), steht hinter „Weitere Angaben" - beim Bearbeiten offen,
+        * sobald eines davon einen Wert traegt. */ ''}
+    <div class="form-group js-entry-field">
+      <label class="form-label" for="bm-amount">${t('budget.amountLabel')}<span class="required-marker" aria-hidden="true"> *</span></label>
+      <input type="number" class="form-input budget-amount-input" id="bm-amount"
+             placeholder="${amountPlaceholder(state.currency)}"
+             step="${amountStep(state.currency, absAmount)}" min="${amountMin(state.currency, absAmount)}"
+             inputmode="decimal" value="${absAmount}">
+    </div>
 
     <div class="form-group js-entry-field">
       <label class="form-label" for="bm-title">${t('budget.titleLabel')}<span class="required-marker" aria-hidden="true"> *</span></label>
@@ -2539,27 +3119,19 @@ function openBudgetModal({ mode, entry = null, initialType = '' }) {
     </div>
 
     <div class="form-group js-entry-field">
-      <label class="form-label" for="bm-amount">${t('budget.amountLabel')}<span class="required-marker" aria-hidden="true"> *</span></label>
-      <input type="number" class="form-input" id="bm-amount"
-             placeholder="${amountPlaceholder(state.currency)}"
-             step="${amountStep(state.currency, absAmount)}" min="${amountMin(state.currency, absAmount)}"
-             inputmode="decimal" value="${absAmount}">
-    </div>
-
-    <div class="form-group js-entry-field">
       <div class="budget-field-header">
-        <label class="form-label" for="bm-category">${t('budget.categoryLabel')}</label>
+        <label class="form-label" for="bm-category">${t('budget.categoryLabel')}<span class="required-marker" aria-hidden="true"> *</span></label>
         <button class="btn btn--secondary budget-inline-add" type="button" id="bm-add-category">${t('budget.addCategory')}</button>
       </div>
-      <select class="form-input" id="bm-category">${catOpts}</select>
+      <select class="form-input" id="bm-category" required aria-required="true">${catOpts}</select>
     </div>
 
-    <div class="form-group js-entry-field" id="bm-subcategory-group">
+    <div class="form-group js-entry-field" id="bm-subcategory-group"${initialCategory ? '' : ' hidden'}>
       <div class="budget-field-header">
-        <label class="form-label" for="bm-subcategory">${t('budget.subcategoryLabel')}</label>
+        <label class="form-label" for="bm-subcategory">${t('budget.subcategoryLabel')}<span class="required-marker" aria-hidden="true"${initialSub.required ? '' : ' hidden'}> *</span></label>
         <button class="btn btn--secondary budget-inline-add" type="button" id="bm-add-subcategory">${t('budget.addSubcategory')}</button>
       </div>
-      <select class="form-input" id="bm-subcategory">${subcatOpts}</select>
+      <select class="form-input" id="bm-subcategory"${initialSub.required ? ' required aria-required="true"' : ''}>${subcatOpts}</select>
     </div>
 
     <div class="form-group js-entry-field">
@@ -2568,34 +3140,33 @@ function openBudgetModal({ mode, entry = null, initialType = '' }) {
              value="${isEdit ? entry.date : defaultDate}"></yuvomi-datepicker>
     </div>
 
-    ${state.budgetMode === 'personal' ? `
-    <div class="form-group js-entry-field">
-      <label class="form-label" for="bm-visibility">${t('budget.visibilityLabel')}</label>
-      <select class="form-input" id="bm-visibility">
-        ${VISIBILITY_LEVELS.map((level) => `
-          <option value="${level}" ${(isEdit ? entry.visibility : 'shared') === level ? 'selected' : ''}>
-            ${esc(t(`budget.visibility_${level}`))}
-          </option>`).join('')}
-      </select>
-      <p class="form-hint" id="bm-visibility-hint">${esc(t(`budget.visibilityHint_${isEdit ? entry.visibility : 'shared'}`))}</p>
-    </div>` : ''}
-
-    ${/* ZUSTAENDIG (#1057) - ein Etikett, das kein Geld bewegt.
-        *
-        * Steht bewusst NEBEN der Sichtbarkeit und nicht in ihr: `owner_id` ist
-        * die Datenschutz-Achse und liegt fest, die Zustaendigkeit ist die
-        * zweite Achse und darf wechseln. Wer die Wasserrechnung uebernimmt,
-        * bekommt damit keine private Buchung und schuldet auch nichts - das
-        * Abrechnen bleibt in den geteilten Ausgaben.
-        *
-        * Verschwindet im Solo-Haushalt: eine Zustaendigkeitsfrage mit genau
-        * einer moeglichen Antwort ist ein Formularfeld ohne Frage (dieselbe
-        * Regel wie in utils/household.js). */ ''}
-    ${responsiblePickerHtml({ members: state.members, entry, isEdit })}
-
     <div class="js-entry-field">
       ${advancedSection(`
         ${accountField}
+        ${state.budgetMode === 'personal' ? `
+        <div class="form-group">
+          <label class="form-label" for="bm-visibility">${t('budget.visibilityLabel')}</label>
+          <select class="form-input" id="bm-visibility">
+            ${VISIBILITY_LEVELS.map((level) => `
+              <option value="${level}" ${(isEdit ? entry.visibility : 'shared') === level ? 'selected' : ''}>
+                ${esc(t(`budget.visibility_${level}`))}
+              </option>`).join('')}
+          </select>
+          <p class="form-hint" id="bm-visibility-hint">${esc(t(`budget.visibilityHint_${isEdit ? entry.visibility : 'shared'}`))}</p>
+        </div>` : ''}
+        ${/* ZUSTAENDIG (#1057) - ein Etikett, das kein Geld bewegt.
+            *
+            * Steht bewusst NEBEN der Sichtbarkeit und nicht in ihr: `owner_id` ist
+            * die Datenschutz-Achse und liegt fest, die Zustaendigkeit ist die
+            * zweite Achse und darf wechseln. Wer die Wasserrechnung uebernimmt,
+            * bekommt damit keine private Buchung und schuldet auch nichts - das
+            * Abrechnen bleibt in den geteilten Ausgaben.
+            *
+            * Verschwindet im Solo-Haushalt: eine Zustaendigkeitsfrage mit genau
+            * einer moeglichen Antwort ist ein Formularfeld ohne Frage (dieselbe
+            * Regel wie in utils/household.js). */ ''}
+        ${responsiblePickerHtml({ members: state.members, entry, isEdit })}
+
         <div class="form-group">
           <label class="toggle">
             <input type="checkbox" id="bm-recurring" ${isEdit && entry.is_recurring ? 'checked' : ''}>
@@ -2637,8 +3208,15 @@ function openBudgetModal({ mode, entry = null, initialType = '' }) {
           hint: t('budget.receiptsHint'),
           icon: 'receipt',
         })}`,
-        { open: isEdit && (entry.is_recurring || !!entry.subcategory || entry.account_id != null
-          || (entry.attachments?.length ?? 0) > 0) })}
+        {
+          label: t('budget.moreDetails'),
+          // Beim Bearbeiten offen, sobald eine der Angaben gesetzt ist - ein
+          // gesetzter Wert hinter einem geschlossenen Riegel waere unsichtbar.
+          open: isEdit && (entry.is_recurring || entry.account_id != null
+            || (entry.attachments?.length ?? 0) > 0
+            || (entry.responsible_users?.length ?? 0) > 0
+            || (state.budgetMode === 'personal' && (entry.visibility ?? 'shared') !== 'shared')),
+        })}
     </div>
 
     <div id="bm-loan-fields" hidden>
@@ -2668,8 +3246,8 @@ function openBudgetModal({ mode, entry = null, initialType = '' }) {
     </div>
 
     <div class="modal-panel__footer modal-panel__footer--plain">
-      ${isEdit ? `<button class="btn btn--danger btn--icon" id="bm-delete" aria-label="${t('budget.deleteLabel')}">
-        <i data-lucide="trash-2" class="icon-md" aria-hidden="true"></i>
+      ${isEdit ? `<button type="button" class="btn btn--danger-outline" id="bm-delete" aria-label="${esc(t('budget.deleteLabel', { title: entry.title }))}" style="margin-inline-end:auto">
+        <i data-lucide="trash-2" class="icon-md" aria-hidden="true"></i>${t('common.delete')}
       </button>` : '<div></div>'}
       <div style="display:flex;gap:var(--space-3)">
         <button class="btn btn--secondary" id="bm-cancel">${t('common.cancel')}</button>
@@ -2680,9 +3258,11 @@ function openBudgetModal({ mode, entry = null, initialType = '' }) {
   openSharedModal({
     title: isEdit ? t('budget.editEntry') : t('budget.newEntry'),
     content,
-    size: 'sm',
+    // Dieselbe Breite wie die anderen Formulardialoge (Kalender, Kontakte):
+    // 400px liessen Kategorie und Unterkategorie nicht nebeneinander stehen.
+    size: 'md',
     onSave(panel) {
-      let currentType = !isEdit && initialType === 'loan' ? 'loan' : (isExpense ? 'expense' : 'income');
+      let currentType = initialTypeId;
 
       // Checkbox-Logik des Zustaendigen-Pickers (#1057): "Niemand" schliesst die
       // uebrigen aus und umgekehrt. Ohne diese Bindung waeren beide gleichzeitig
@@ -2708,9 +3288,8 @@ function openBudgetModal({ mode, entry = null, initialType = '' }) {
 
       const setType = (type) => {
         currentType = type;
-        panel.querySelector('#type-expense').classList.toggle('amount-type-btn--active', type === 'expense');
-        panel.querySelector('#type-income').classList.toggle('amount-type-btn--active', type === 'income');
-        panel.querySelector('#type-loan')?.classList.toggle('amount-type-btn--active', type === 'loan');
+        // Den Zustand der Leiste (is-active, aria-checked, tabindex) malt
+        // wireTablist - hier nur, was am Typ haengt.
         panel.querySelectorAll('.js-entry-field').forEach((el) => { el.hidden = type === 'loan'; });
         panel.querySelector('#bm-loan-fields').hidden = type !== 'loan';
         // Wiederkehrungs-Optionen nur zeigen, wenn "Wiederkehrend" aktiv ist.
@@ -2728,6 +3307,13 @@ function openBudgetModal({ mode, entry = null, initialType = '' }) {
         const catSelect = panel.querySelector('#bm-category');
         const currentValue = preferredCategory || catSelect.value;
 
+        // Der Platzhalter bleibt die erste Option: passt die bisherige Wahl
+        // nicht zum neuen Typ (Ausgabe -> Einnahme), steht die Auswahl wieder
+        // leer, statt still auf die erste Kategorie des anderen Typs zu fallen.
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.disabled = true;
+        placeholder.textContent = t('budget.categoryPlaceholder');
         const options = cats.map((c) => {
           const opt = document.createElement('option');
           opt.value = c.key;
@@ -2735,8 +3321,8 @@ function openBudgetModal({ mode, entry = null, initialType = '' }) {
           opt.selected = currentValue === c.key;
           return opt;
         });
-        catSelect.replaceChildren(...options);
-        if (!cats.some((c) => c.key === catSelect.value)) catSelect.value = cats[0]?.key || '';
+        catSelect.replaceChildren(placeholder, ...options);
+        if (!cats.some((c) => c.key === currentValue)) catSelect.value = '';
         updateSubcategoryOptions();
       };
 
@@ -2745,19 +3331,29 @@ function openBudgetModal({ mode, entry = null, initialType = '' }) {
         const subcatGroup = panel.querySelector('#bm-subcategory-group');
         const subcatSelect = panel.querySelector('#bm-subcategory');
         const subcategories = getSubcategories(catSelect.value);
-        const currentValue = preferredSubcategory || subcatSelect.value;
+        const choice = subcategoryChoice(catSelect.value, preferredSubcategory || subcatSelect.value);
 
-        subcatGroup.hidden = false;
-        subcatSelect.replaceChildren(...subcategories.map((s) => {
+        // Ohne Kategorie gibt es keine Unterkategorie zu waehlen.
+        subcatGroup.hidden = !catSelect.value;
+        const options = subcategories.map((s) => {
           const opt = document.createElement('option');
           opt.value = s.key;
           opt.textContent = subcategoryLabel(s);
-          opt.selected = currentValue === s.key;
           return opt;
-        }));
-        if (subcategories.length && !subcategories.some((s) => s.key === subcatSelect.value)) {
-          subcatSelect.value = subcategories[0].key;
+        });
+        if (choice.placeholder) {
+          const placeholder = document.createElement('option');
+          placeholder.value = '';
+          placeholder.disabled = true;
+          placeholder.textContent = t('budget.subcategoryPlaceholder');
+          options.unshift(placeholder);
         }
+        subcatSelect.replaceChildren(...options);
+        subcatSelect.value = choice.value;
+        subcatSelect.required = choice.required;
+        if (choice.required) subcatSelect.setAttribute('aria-required', 'true');
+        else subcatSelect.removeAttribute('aria-required');
+        subcatGroup.querySelector('.required-marker').hidden = !choice.required;
       };
 
       const addCategory = async () => {
@@ -2798,15 +3394,17 @@ function openBudgetModal({ mode, entry = null, initialType = '' }) {
         }
       };
 
-      panel.querySelector('#type-expense').addEventListener('click', () => {
-        setType('expense');
+      // Dieselbe Verhaltensschicht wie der Darlehens-Statusfilter: Klick,
+      // Pfeiltasten/Home/End, Roving-Tabindex und aria-checked im select-Modus;
+      // die Kapsel gleitet mit (Kanon, Runde 7 D8). Eine gesperrte Rate
+      // (disabled) nimmt weder Klick noch Fokus an.
+      wireTablist(panel.querySelector('.budget-type-toggle'), {
+        activeId: currentType,
+        activeClass: 'is-active',
+        mode: 'select',
+        onChange: (id) => setType(id),
       });
-      panel.querySelector('#type-income').addEventListener('click', () => {
-        setType('income');
-      });
-      panel.querySelector('#type-loan')?.addEventListener('click', () => {
-        setType('loan');
-      });
+      attachSegmentIndicator(panel.querySelector('.budget-type-toggle'));
       wireLoanDirectionField(panel);
       wireLoanCurrencyFields(panel);
       wireLoanInterestFields(panel);
@@ -2895,6 +3493,14 @@ function openBudgetModal({ mode, entry = null, initialType = '' }) {
         }
         if (isNaN(absVal) || absVal <= 0) {
           reportFieldError(panel.querySelector('#bm-amount'), t('budget.validAmountRequired'));
+          return;
+        }
+        if (!category) {
+          reportFieldError(panel.querySelector('#bm-category'), t('budget.categoryRequired'));
+          return;
+        }
+        if (!subcategory && subcategoryChoice(category).required) {
+          reportFieldError(panel.querySelector('#bm-subcategory'), t('budget.subcategoryRequired'));
           return;
         }
         if (rejectOffGridAmount(panel.querySelector('#bm-amount'), absVal, state.currency, {
@@ -3536,7 +4142,7 @@ function openLoanModal(loan = null) {
       <label class="form-label" for="lm-paid">${t('budget.loanPaidInstallmentsLabel')}</label>
       <input type="number" class="form-input" id="lm-paid" step="1" min="0"
              inputmode="numeric" value="0">
-      <p class="budget-loan-hint">${t('budget.loanPaidInstallmentsHint')}</p>
+      <p class="form-hint budget-loan-hint">${t('budget.loanPaidInstallmentsHint')}</p>
     </div>`}
     <div class="form-group">
       <label class="form-label" for="lm-notes">${t('budget.loanNotesLabel')}</label>
@@ -3724,9 +4330,69 @@ async function openConfirmBookingModal(id) {
   });
 }
 
+/* DIE BILANZ RECHNET MIT, WAS DIE LISTE SCHON ZEIGT (Re-Critique 2026-09-27,
+ * A5 P3). Loeschen nahm die Zeile sofort aus der Liste, aber Saldo, Ein/Aus und
+ * Kategorien blieben bis zum Commit (5 s Undo-Fenster) auf dem alten Wert - zwei
+ * Aussagen ueber denselben Monat, die sich widersprachen. `sign` -1 rechnet die
+ * Buchungen heraus, +1 (Undo) wieder hinein. Dieselben Regeln wie der Server
+ * (`GET /budget/summary`): offene Buchungen (`is_pending`) zaehlen nur im
+ * Offen-Hinweis, und nur Buchungen des Monats der Bilanz zaehlen - ein Undo
+ * nach dem Blaettern rechnet nichts in den falschen Monat. Nach dem Commit
+ * kommt ohnehin der Serverstand. Gibt eine neue Bilanz zurueck. */
+function summaryWith(summary, entries, sign) {
+  if (!summary) return summary;
+  const round = (n) => Math.round(n * 1e6) / 1e6;
+  const next = {
+    ...summary,
+    byCategory: (summary.byCategory ?? []).map((row) => ({ ...row })),
+    pending: summary.pending ? { ...summary.pending } : summary.pending,
+  };
+  for (const e of entries) {
+    const amount = Number(e?.amount);
+    if (!Number.isFinite(amount)) continue;
+    if (summary.month && String(e.date ?? '').slice(0, 7) !== summary.month) continue;
+    const income = amount > 0 ? amount : 0;
+    const expenses = amount < 0 ? amount : 0;
+    if (e.is_pending) {
+      if (!next.pending) continue;
+      next.pending.count = Math.max(0, (next.pending.count || 0) + sign);
+      next.pending.income = round((next.pending.income || 0) + sign * income);
+      next.pending.expenses = round((next.pending.expenses || 0) + sign * expenses);
+      continue;
+    }
+    next.income = round((next.income || 0) + sign * income);
+    next.expenses = round((next.expenses || 0) + sign * expenses);
+    next.balance = round((next.balance || 0) + sign * amount);
+    let row = next.byCategory.find((r) => r.category === e.category);
+    if (!row && sign > 0) {
+      row = { category: e.category, income: 0, expenses: 0, total: 0 };
+      next.byCategory.push(row);
+    }
+    if (!row) continue;
+    row.income = round((row.income || 0) + sign * income);
+    row.expenses = round((row.expenses || 0) + sign * expenses);
+    row.total = round((row.total || 0) + sign * amount);
+  }
+  // Eine Kategorie ohne Buchung liefert der Server nicht - das Diagramm auch nicht.
+  next.byCategory = next.byCategory.filter((r) => r.income !== 0 || r.expenses !== 0);
+  return next;
+}
+
+/* Zeigt `state.entries` weniger Buchungen, als `state.summary` zaehlt? Nur der
+ * Konto-Drilldown: `account_id` geht an `GET /budget`, nicht an
+ * `/budget/summary` (loadMonth). Der Scope geht an beide Abfragen, und der
+ * Zustaendigen-Filter greift erst beim Zeichnen (visibleEntries) -
+ * `state.entries` bleibt dabei vollstaendig. */
+function listNarrowsSummary() {
+  return state.accountFilterId != null;
+}
+
 async function deleteEntry(id) {
   if (readOnly()) return;
-  const entry = state.entries.find((e) => e.id === id);
+  const entry = findEntry(id);
+  // Aus der Suche heraus kann die Buchung in einem anderen Monat liegen - dann
+  // aendert ihr Loeschen die Bilanz dieses Monats nicht.
+  const inMonth = state.entries.some((e) => e.id === id);
 
   if (entry && (entry.is_recurring || entry.recurrence_parent_id)) {
     const scope = await recurringChoiceModal({
@@ -3740,6 +4406,10 @@ async function deleteEntry(id) {
   }
 
   state.entries = state.entries.filter((e) => e.id !== id);
+  if (state.ledgerResults) state.ledgerResults = state.ledgerResults.filter((e) => e.id !== id);
+  // Auch im Konto-Drilldown genau: der Server loescht genau diese eine
+  // Buchung, und sie steht in der Liste - anders als die Serie (listNarrowsSummary).
+  if (entry && inMonth) state.summary = summaryWith(state.summary, [entry], -1);
   renderBody();
   vibrate([30, 50, 30]);
 
@@ -3752,10 +4422,21 @@ async function deleteEntry(id) {
       renderBody();
     },
     restore: (err) => {
-      if (entry) {
-        state.entries = [...state.entries, entry].sort((a, b) => new Date(b.date) - new Date(a.date));
-        renderBody();
+      // Nur in den Monat zurueck, aus dem sie kam: nach dem Blaettern zeigt
+      // die Liste einen anderen Monat, und die Buchung gehoert nicht hinein.
+      const byDate = (a, b) => new Date(b.date) - new Date(a.date);
+      let back = false;
+      if (entry && inMonth && String(entry.date ?? '').slice(0, 7) === state.month) {
+        state.entries = [...state.entries, entry].sort(byDate);
+        state.summary = summaryWith(state.summary, [entry], 1);
+        back = true;
       }
+      // Und in die Treffer, falls die Suche noch steht.
+      if (entry && state.ledgerQuery && state.ledgerResults) {
+        state.ledgerResults = [...state.ledgerResults.filter((e) => e.id !== id), entry].sort(byDate);
+        back = true;
+      }
+      if (back) renderBody();
       if (err) window.yuvomi?.showToast(err.data?.error ?? t('common.unknownError'), 'danger');
     },
   });
@@ -3791,7 +4472,7 @@ function recurringChoiceModal({ title, thisLabel, seriesLabel, seriesDanger = fa
         <div class="modal-actions modal-actions--stack">
           <button type="button" class="btn btn--secondary" id="rcs-this">${thisLabel}</button>
           <button type="button" class="btn ${seriesDanger ? 'btn--danger' : 'btn--primary'}" id="rcs-series">${seriesLabel}</button>
-          <button type="button" class="btn btn--ghost" id="rcs-cancel">${t('common.cancel')}</button>
+          <button type="button" class="btn btn--secondary" id="rcs-cancel">${t('common.cancel')}</button>
         </div>`,
       onClose: () => finish(null),
       onSave(panel) {
@@ -3805,9 +4486,20 @@ function recurringChoiceModal({ title, thisLabel, seriesLabel, seriesDanger = fa
 
 async function deleteEntrySeries(id) {
   if (readOnly()) return;
-  const entry = state.entries.find((e) => e.id === id);
+  const entry = findEntry(id);
   const parentId = entry?.recurrence_parent_id ?? (entry?.is_recurring ? entry.id : id);
-  state.entries = state.entries.filter((e) => e.id !== parentId && e.recurrence_parent_id !== parentId);
+  const inSeries = (e) => e.id === parentId || e.recurrence_parent_id === parentId;
+  const removed = state.entries.filter(inSeries);
+  state.entries = state.entries.filter((e) => !inSeries(e));
+  if (state.ledgerResults) state.ledgerResults = state.ledgerResults.filter((e) => !inSeries(e));
+  // Das Undo laedt den Monat neu (restore unten) - herausrechnen genuegt hier.
+  // Aber nur, wenn die Liste alles zeigt, was die Bilanz zaehlt: im
+  // Konto-Drilldown fehlen ihr Vorkommen, die per Einzel-Bearbeitung auf ein
+  // anderes Konto gewandert sind, und `/budget/:id/series` loescht sie mit.
+  // Dann bleibt die Bilanz beim Serverstand, bis der Commit (bzw. das Undo)
+  // den Monat samt Summary neu laedt - ein halb herausgerechneter Saldo waere
+  // eine dritte Zahl, die weder vorher noch nachher stimmt.
+  if (!listNarrowsSummary()) state.summary = summaryWith(state.summary, removed, -1);
   renderBody();
   vibrate([30, 50, 30]);
 
@@ -3836,9 +4528,24 @@ async function deleteEntrySeries(id) {
 // statt Quelltext-Regex.
 export const __test = {
   monthNavHtml,
+  // Critique 2026-09-25, Mobil: Top-3-Auswahl des Diagramms und das EINE
+  // Werkzeug-Menue der Buchungsliste, als Programm statt als Quelltext.
+  categoryBlocks,
+  chartHasMore,
+  chartSummary,
+  renderCategoryBars,
+  balanceGlanceHtml,
+  listToolsMenuHtml,
+  CHART_LEAD,
   syncCurrentButton,
   tabCaps,
   tabFromQuery,
+  // R8 H5/H6: Adresse je Reiter und die mitrechnende Bilanz beim Loeschen.
+  tabSearch,
+  writeTabToUrl,
+  summaryWith,
+  deleteEntrySeries,
+  subcategoryChoice,
   currentMonth,
   state,
   // #1228: Zustaendigen-Picker fuer test:people-pickers.
@@ -3867,7 +4574,10 @@ export const __test = {
   renderAccountsPage,
   renderLoansPage,
   renderLoanCard,
+  // R15 A5 P1-1: der Titelknopf oeffnet den Bericht - gemessen als Programm.
+  wireLoanCards,
   renderLoanPaymentEntry,
+  renderLoanTransactions,
   // Die Leseansichten (#1265 P7): die Zeilen als reine Funktionen, und der
   // Einstieg, dessen Aussage KEIN Markup ist - welche Optionen er
   // `openDetailView` uebergibt, sieht nur, wer sie ihm abnimmt.
@@ -3884,5 +4594,20 @@ export const __test = {
   renderBodyForTest(container) {
     _container = container;
     renderBody();
+  },
+  // Re-Critique 2026-09-27 (M4): die beiden Aufklapper der mobilen Kopfzeile
+  // gegen einen Test-Container - beide Knoepfe des Diagramms muessen denselben
+  // Zustand melden.
+  toggleCategoryChartForTest(container) {
+    _container = container;
+    toggleCategoryChart();
+  },
+  toggleBalanceDetailsForTest(container) {
+    _container = container;
+    toggleBalanceDetails();
+  },
+  markTabEnteringForTest(container) {
+    _container = container;
+    markTabEntering();
   },
 };

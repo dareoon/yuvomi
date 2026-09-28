@@ -447,3 +447,113 @@ test('die Serverliste traegt jede Locale-Datei des Ordners', async () => {
     'Die Serverliste ist kuerzer als der Ordner - eine Datei faellt aus dem Muster.');
   assert.ok(getSupportedLocales().includes('fil'), 'fil fehlt - der Code aus #1322');
 });
+
+// CLAUDE.md: ueberall `-` statt Gedankenstrich, auch in UI-Texten (Kritik
+// 2026-09-25: 33 Werte in 21 Locales). Die Ausnahmen sind SPRACHREGELN, keine
+// Stilwahl, und stehen hier einzeln mit Grund - eine Allowlist, damit eine neue
+// Uebersetzung den Strich nicht still zurueckbringt.
+//  - zh: "——" ist der chinesische Gedankenstrich (破折号), ein eigenes
+//    Satzzeichen; ein Bindestrich ist im chinesischen Fliesstext kein Ersatz.
+//    Erlaubt ist nur die Doppelform, ein einzelner Strich bleibt ein Befund.
+//  - ru/uk tasks.subtaskDeleteDetail: der Strich steht fuer das ausgelassene
+//    Praedikat ("это — нет" = "das hier [laesst sich] nicht"); die Grammatik
+//    verlangt ihn dort, ein Bindestrich waere ein Fehler.
+const DASH_EXCEPTIONS = {
+  zh: { allLocale: /——/g },
+  ru: { keys: new Set(['tasks.subtaskDeleteDetail']) },
+  uk: { keys: new Set(['tasks.subtaskDeleteDetail']) },
+};
+
+test('kein Locale-Wert traegt einen Gedankenstrich ausser den begruendeten Sprachregeln', () => {
+  const hits = [];
+  for (const locale of LOCALES) {
+    const rule = DASH_EXCEPTIONS[locale] || {};
+    for (const [key, value] of flatten(JSON.parse(readLocale(locale)))) {
+      if (rule.keys?.has(key)) continue;
+      const rest = rule.allLocale ? value.replace(rule.allLocale, '') : value;
+      if (/[\u2013\u2014]/.test(rest)) hits.push(`${locale}: ${key}`);
+      // Der chinesische Strich steht ohne Leerzeichen zwischen den Zeichen.
+      if (rule.allLocale && / ——|—— /.test(value)) hits.push(`${locale}: ${key} (Leerzeichen am ——)`);
+    }
+  }
+  assert.deepEqual(hits, []);
+});
+
+test('jede Gedankenstrich-Ausnahme trifft einen Wert, der den Strich wirklich traegt', () => {
+  // Sonst ueberlebt eine Ausnahme ihren Anlass und deckt spaeter einen neuen Strich.
+  for (const [locale, rule] of Object.entries(DASH_EXCEPTIONS)) {
+    const values = flatten(JSON.parse(readLocale(locale)));
+    for (const key of rule.keys || []) {
+      assert.match(values.get(key) ?? '', /[\u2013\u2014]/, `${locale}: ${key}`);
+    }
+    if (rule.allLocale) {
+      assert.ok([...values.values()].some((v) => rule.allLocale.test(v)), `${locale}: keine Doppelform mehr`);
+      rule.allLocale.lastIndex = 0;
+    }
+  }
+});
+
+// Dasselbe fuer Texte, die NICHT aus einer Locale kommen: Template- und
+// String-Literale im Frontend-JS (Re-Critique 2026-09-28, F7). Gefunden: der
+// Halbgeviertstrich zwischen "Ueberfaellig" und Datum sowie zwischen "Heute"
+// und Uhrzeit in task-fields.js und als Leerwert im Dokumentspeicher-Blatt. Kommentare zaehlen hier nicht (die
+// liest kein Nutzer); was nach dem Schnitt bleibt, ist Code und Literal.
+test('kein String im Frontend-JS traegt einen Gedankenstrich', async () => {
+  const { withoutCommentsKeepingLines } = await import('./source-text.js');
+  const root = new URL('../public/', import.meta.url);
+  const files = readdirSync(root, { recursive: true })
+    .filter((f) => f.endsWith('.js') && !f.startsWith('vendor/'));
+  assert.ok(files.length > 100, `zu wenige Dateien gelesen: ${files.length}`);
+  const hits = [];
+  for (const file of files) {
+    const code = withoutCommentsKeepingLines(readFileSync(new URL(file, root), 'utf8'));
+    code.split('\n').forEach((line, i) => {
+      if (/[\u2013\u2014]/.test(line)) hits.push(`public/${file}:${i + 1}: ${line.trim().slice(0, 100)}`);
+    });
+  }
+  assert.deepEqual(hits, []);
+});
+
+// Re-Critique 2026-09-28 (A2 P3, R14 P12): das Datumsfeld zeigte im deutschen
+// UI "DD.MM.YYYY" - englische Buchstaben fuer Tag/Monat/Jahr. Die REIHENFOLGE
+// und die Trenner folgen weiter der Datumsformat-Einstellung (Region), die
+// BUCHSTABEN jetzt der UI-Sprache ("TT.MM.JJJJ" wie in Apples Systemfeldern).
+// Gefahren wird die echte i18n.js mit den echten Locale-Dateien.
+test('dateInputPlaceholder spricht die UI-Sprache, die Reihenfolge bleibt die der Einstellung', async () => {
+  const GLOBALS = ['localStorage', 'fetch', 'document', 'window', 'navigator', 'CustomEvent'];
+  const saved = new Map(GLOBALS.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
+  const store = new Map();
+  const define = (name, value) => Object.defineProperty(globalThis, name, { value, configurable: true, writable: true });
+  define('localStorage', {
+    getItem: (key) => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => { store.set(key, String(value)); },
+    removeItem: (key) => { store.delete(key); },
+  });
+  define('fetch', async (url) => {
+    const file = String(url).replace(/^\/locales\//, '');
+    return { ok: true, json: async () => JSON.parse(readFileSync(new URL(`../public/locales/${file}`, import.meta.url), 'utf8')) };
+  });
+  define('document', { documentElement: { lang: '', dir: '' } });
+  define('window', { dispatchEvent: () => true });
+  define('navigator', { languages: ['de'], language: 'de' });
+  define('CustomEvent', class { constructor(type, init) { this.type = type; this.detail = init?.detail; } });
+  const i18n = await import('../public/i18n.js');
+  try {
+    store.set('yuvomi-locale', 'de');
+    await i18n.initI18n();
+    assert.equal(i18n.dateInputPlaceholder(), 'TT.MM.JJJJ', 'de, Einstellung dmy');
+    store.set('yuvomi-date-format', 'ymd');
+    assert.equal(i18n.dateInputPlaceholder(), 'JJJJ-MM-TT', 'de, Einstellung ymd: Reihenfolge aus der Einstellung');
+    store.set('yuvomi-date-format', 'dmy');
+    await i18n.setLocale('en');
+    assert.equal(i18n.dateInputPlaceholder(), 'DD.MM.YYYY', 'en behaelt seine Buchstaben');
+    await i18n.setLocale('fr');
+    assert.equal(i18n.dateInputPlaceholder(), 'JJ.MM.AAAA', 'fr: jour, mois, annee');
+  } finally {
+    await i18n.setLocale('de');
+    for (const [name, descriptor] of saved) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else delete globalThis[name];
+    }
+  }
+});

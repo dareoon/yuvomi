@@ -88,7 +88,16 @@ async function tailAtEnd(page) {
       if (!painted) continue;
       const r = el.getBoundingClientRect();
       if (!r.width || !r.height) continue;
-      if (r.bottom > last) { last = r.bottom; who = String(el.className || el.tagName).slice(0, 60); }
+      // Sichtbar ist nur, was kein innerer Scroller wegschneidet: die klebende
+      // Einstellungs-Liste (R10) scrollt fuer sich, ihre letzten Zeilen liegen
+      // rechnerisch 300px unter dem Fenster, zu sehen ist ihre Kante. Deren
+      // Unterkante misst die Sonde weiter - sie ist selbst Inhalt.
+      let seenBottom = r.bottom;
+      for (let a = el.parentElement; a && a !== ac; a = a.parentElement) {
+        if (getComputedStyle(a).overflowY !== 'visible') seenBottom = Math.min(seenBottom, a.getBoundingClientRect().bottom);
+      }
+      if (seenBottom <= r.top) continue;
+      if (seenBottom > last) { last = seenBottom; who = String(el.className || el.tagName).slice(0, 60); }
     }
     return {
       path: location.pathname,
@@ -117,9 +126,14 @@ for (const device of ['desktop', 'mobile']) {
     const seen = [];
     for (const path of PAGE_SCROLL_ROUTES) {
       await gotoRoute(page, path);
-      // Die Uebersicht bringt ihren FAB am Zeiger selbst mit; dort wird der
-      // echte Summand gemessen, nicht der gesetzte.
-      if (path !== '/' || device === 'mobile') {
+      // Die Uebersicht bringt mobil ihren FAB am Zeiger selbst mit; dort wird
+      // der echte Summand gemessen, nicht der gesetzte. Am Desktop dockt er
+      // seit R14 (Re-Critique 2026-09-28, A8 P3-2) als Pille "+ Neu" im Kopf
+      // - dann schwebt nichts, und die Uebersicht misst wie jede Route den
+      // Summanden des Install-Banners.
+      const floatingFab = await page.evaluate(() => [...document.querySelectorAll('.page-fab:not([hidden])')]
+        .some((el) => getComputedStyle(el).position === 'fixed'));
+      if (path !== '/' || device === 'mobile' || !floatingFab) {
         await page.evaluate(() => document.documentElement.style.setProperty('--install-prompt-tail', '96px'));
       }
       const m = await tailAtEnd(page);
@@ -140,6 +154,10 @@ for (const device of ['desktop', 'mobile']) {
   });
 }
 
+// Seit R14 (A8 P3-2) schwebt am Desktop kein FAB mehr ueber der Uebersicht:
+// "Neu" ist eine Pille im Kopf. Die Regel dahinter - am Seitenende liegt keine
+// schwebende Flaeche auf einem Widget - gilt weiter; gemessen wird ein
+// schwebender FAB, und steht keiner da, muss die Pille im Kopf stehen.
 test('Nachlauf: am Seitenende der Uebersicht liegt der FAB auf keinem Widget (desktop)', async () => {
   const page = await openPage(harness, { device: 'desktop' });
   // Die rechte Spalte reicht bis ans Ende - der Anlassfall der Critique. Endet
@@ -155,8 +173,11 @@ test('Nachlauf: am Seitenende der Uebersicht liegt der FAB auf keinem Widget (de
   await gotoRoute(page, '/');
   await tailAtEnd(page);
   const hits = await page.evaluate(() => {
-    const fab = document.querySelector('.page-fab:not([hidden])');
-    if (!fab) return null;
+    const fab = [...document.querySelectorAll('.page-fab:not([hidden])')].find((el) => getComputedStyle(el).position === 'fixed');
+    if (!fab) {
+      const pill = document.querySelector('.page-fab--docked:not([hidden])');
+      return pill ? { docked: true, reach: true, ids: [] } : null;
+    }
     const f = fab.getBoundingClientRect();
     const wrappers = [...document.querySelectorAll('.widget-wrapper')];
     const lowest = wrappers.reduce((a, w) => (w.getBoundingClientRect().bottom > (a?.getBoundingClientRect().bottom ?? -1) ? w : a), null);
@@ -171,7 +192,7 @@ test('Nachlauf: am Seitenende der Uebersicht liegt der FAB auf keinem Widget (de
     };
   });
   await page.close();
-  assert.ok(hits, 'Reichweite: auf der Uebersicht am Zeiger schwebt kein FAB');
+  assert.ok(hits, 'Reichweite: weder ein schwebender FAB noch die Pille "Neu" im Kopf');
   assert.ok(hits.reach, 'Reichweite: das Raster endet nicht unter dem Knopf');
   assert.deepEqual(hits.ids, [], `Am Seitenende liegt der FAB auf: ${hits.ids.join(', ')}`);
 });
@@ -407,6 +428,7 @@ async function gridCells(page) {
       flow: cs.gridAutoFlow,
       order,
       inner,
+      cells: occ,
       map: occ.map((row) => row.map((v) => (v || '.').slice(0, 8)).join(' | ')).join('\n'),
     };
   });
@@ -441,7 +463,18 @@ test('Raster: eine eigene Reihenfolge laesst keine Loecher, in Ansicht UND Bearb
   assert.deepEqual(view.order, ['calendar', 'tasks', 'notes'], 'Die gespeicherte Reihenfolge bleibt die Rangfolge im Dokument');
   assert.deepEqual(view.inner, [], `Loch in der Ansicht:\n${view.map}`);
   assert.deepEqual(edit.inner, [], `Loch im Bearbeiten-Modus:\n${edit.map}`);
-  assert.equal(edit.map, view.map, 'Beim Umschalten springen Karten');
+  // Keine Karte springt: jede Zelle, die im Bearbeiten-Modus belegt ist, traegt
+  // in der Ansicht dieselbe Kachel. Die Ansicht darf nur LEERE Zellen fuellen -
+  // seit R10 (L9) waechst die Kachel vor einer Luecke in den Rest ihrer Reihe,
+  // der Bearbeiten-Modus zeigt die gewaehlte Groesse und damit das Loch samt
+  // Hinweis. Ein Vergleich der ganzen Karte hielt dieses Wachsen fuer Springen.
+  const moved = [];
+  edit.cells.forEach((row, ri) => row.forEach((id, ci) => {
+    const shown = view.cells[ri]?.[ci] ?? null;
+    if (id && shown !== id) moved.push(`${ri}/${ci}: ${id} -> ${shown}`);
+  }));
+  assert.deepEqual(moved, [], `Beim Umschalten springen Karten:\nAnsicht\n${view.map}\nBearbeiten\n${edit.map}`);
+  assert.deepEqual(view.order, edit.order, 'Die Reihenfolge ist in beiden Modi dieselbe');
 });
 
 test('Raster: Ziehen und Ablegen ordnet im dichten Raster weiter um', async () => {

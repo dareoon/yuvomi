@@ -9,14 +9,18 @@ import { renderDocumentAttachField, bindDocumentAttachField, attachmentLinksNode
 import { openDetailView } from '/components/detail-view.js';
 import { t, formatDate, getLocale, getNumberFormat, dateInputPlaceholder, parseDateInput, isDateInputValid } from '/i18n.js';
 import { esc } from '/utils/html.js';
+import { installPopoverMenus } from '/utils/popover-menu.js';
+import { renderPageSearch, wirePageSearch } from '/utils/page-search.js';
 import { stagger } from '/utils/ux.js';
 import { renderSkeletonList } from '/utils/skeleton.js';
 import { formatMoney, amountPlaceholder, toDecimalString, amountIsSavable, smallestUnitLabel } from '/utils/money.js';
 import { todayKey } from '/utils/date.js';
 import { zonedDateKey } from '/utils/timezone.js';
 import { wireTablist } from '/utils/tablist.js';
+import { attachSegmentIndicator } from '/utils/segment-indicator.js';
 import { findPageFab } from '/utils/fab.js';
 import { emptyStateHTML } from '/utils/empty-state.js';
+import { metricGlanceHtml, wireMetricGlance } from '/utils/metric-glance.js';
 import { isNavModuleReadOnly } from '/permissions.js';
 
 let state = {
@@ -69,6 +73,9 @@ export function prefillSplitExpense(data) {
   _pendingPrefill = data ?? null;
 }
 let _statusTablist = null;   // wireTablist-Handle des Statusfilters (sync ohne onChange)
+// Eingebettet meldet die Seite dem Budget-Kopf, wenn sich aendert, ob eine neue
+// Ausgabe gerade moeglich ist (Archiv an/aus) - der Kopfknopf gehoert budget.js.
+let _onAddableChange = null;
 
 /**
  * Darf dieser Nutzer hier schreiben? (#467, #1265 P7)
@@ -115,9 +122,10 @@ function groupIcon(type) {
   }[type] || 'users';
 }
 
-export async function render(container, { user, embedded = false } = {}) {
+export async function render(container, { user, embedded = false, onAddableChange = null } = {}) {
   _container = container;
   _embedded = embedded;
+  _onAddableChange = onAddableChange;
   state.user = user || null;
   // `split`, nicht `reading`: Kopf und Kennzahlenband stehen ueber einem
   // zweispaltigen .split-layout (Gruppen links, Detail rechts) - das IST die
@@ -126,46 +134,61 @@ export async function render(container, { user, embedded = false } = {}) {
   // das Shell-Raster wirkt nur auf .app-page__body, den es hier nicht gibt.
   //
   // EINGEBETTET (budget.js ruft immer mit embedded:true - es gibt heute keine
-  // eigenstaendige Route) TRAEGT DIE UEBERSCHRIFT KEIN ZWEITES <h1>: der
-  // Modulkopf sagt bereits "Budget" (Cross-Modul-Review). Die Budget-Seiten-
-  // CSS behandelte den Split-Titel dort eingebettet schon laenger als
-  // Bereichs-Ueberschrift (typography.css) - das Element selbst blieb bis
-  // hierher ein <h1> und widersprach damit seiner eigenen Rolle. Aus demselben
-  // Grund traegt der Knopf hier --secondary statt --primary: die Primaeraktion ist der FAB
-  // (#split-fab, siehe unten), nicht zwei violette Knoepfe fuer dieselbe
-  // Handlung. Unveraendert bleibt die (heute nicht erreichte) eigenstaendige
-  // Zukunft: <h1> plus Primaerknopf, falls Split-Ausgaben je eine eigene
-  // Navigationsebene bekommt (DESIGN.md, Q-3).
-  const TitleTag = embedded ? 'h2' : 'h1';
-  const addExpenseBtnVariant = embedded ? 'btn--secondary' : 'btn--primary';
-  setHtml(container, `
-    <div class="split-page app-page app-page--split" data-composition="split">
-      <header class="panel-head split-topbar">
+  // eigenstaendige Route) TRAEGT DAS PANEL KEINEN EIGENEN KOPF MEHR
+  // (Critique 2026-09-25): hier standen ein zweiter Seitentitel („Gemeinsame
+  // Ausgaben"), eine Beschreibung und ein Sekundaerknopf, obwohl der Tab
+  // „Aufteilung" heisst und der Budget-Kopf die Seite schon benennt. Der Tab-
+  // Name bleibt der EINE Begriff; die Ueberschrift steht fuer die Gliederung
+  // als sr-only-<h2> (Budget > Aufteilung > Gruppe > Abschnitt), wie Konten und
+  // Darlehen. „Ausgabe hinzufuegen" ist der FAB des Budgets (#fab-new-budget,
+  // TAB_CAPS) - mobil schwebend, am Desktop in den Budget-Kopf gedockt, statt
+  // dass ein eigener #split-fab ueber „87,50 €" schwebt. Unveraendert bleibt die (heute nicht erreichte)
+  // eigenstaendige Zukunft: <h1>, Beschreibung, Primaerknopf und eigener FAB.
+  const head = embedded
+    ? `<h2 class="sr-only">${t('splitExpenses.tabLabel')}</h2>`
+    : `<header class="panel-head split-topbar">
         <div>
-          <${TitleTag} class="split-title">${t('splitExpenses.title')}</${TitleTag}>
+          <h1 class="split-title">${t('splitExpenses.title')}</h1>
           <p class="split-subtitle">${t('splitExpenses.subtitle')}</p>
         </div>
-        ${readOnly() ? '' : `<button class="btn ${addExpenseBtnVariant}" id="split-add-expense">
+        ${readOnly() ? '' : `<button class="btn btn--primary" id="split-add-expense">
           <i data-lucide="plus" class="icon-md" aria-hidden="true"></i>
           ${t('splitExpenses.addExpense')}
         </button>`}
-      </header>
-      <section class="metric-grid" id="split-summary"></section>
+      </header>`;
+  const fab = embedded ? '' : `
+      <button class="page-fab" id="split-fab" aria-label="${t('splitExpenses.addExpense')}" data-dock-label="${t('newLabel.splitExpenses')}">
+        <i data-lucide="plus" class="icon-xl" aria-hidden="true"></i>
+      </button>`;
+  setHtml(container, `
+    <div class="split-page app-page app-page--split" data-composition="split">
+      ${head}
+      <!-- Mobil EINE Zeile statt drei Karten (R14 P1): die Glance-Zeile
+           klappt die Kennzahl-Zeile auf (metric-glance.js, budget.css). -->
+      <div id="split-glance"></div>
+      <section class="metric-grid budget-glance-details" id="split-summary"></section>
       <div class="split-layout">
         <aside class="split-groups-panel">
-          <div class="split-panel-head">
-            <div class="split-panel-title">${t('splitExpenses.groups')}</div>
+          <!-- Das geteilte Suchfeld (gefuellte Kapsel) statt eines eigenen mit
+               sichtbarem Label darueber, das nur den Platzhalter wiederholte
+               (Komponenten-Kanon, Critique 2026-09-26 P1). Es steht IM Kopf
+               der Liste, die es filtert (.section-toolbar wie das Hauptbuch,
+               R14 P1): mobil in seiner Icon-Form statt einer eigenen 48px-Zeile
+               vor der ersten Gruppe. -->
+          <div class="split-panel-head section-toolbar">
+            <div class="split-panel-title">${t('splitExpenses.groups')}<span class="list-group__count split-panel-count" id="split-group-count"></span></div>
+            ${renderPageSearch({
+    id: 'split-group-search',
+    label: t('splitExpenses.searchGroups'),
+    placeholder: t('splitExpenses.searchGroups'),
+    value: state.query,
+    clearLabel: t('common.searchClear'),
+    className: 'split-search',
+  })}
             ${readOnly() ? '' : `<button class="btn btn--icon" id="split-add-group" aria-label="${t('splitExpenses.addGroup')}" ${isSplitGuest() ? 'hidden' : ''}>
               <i data-lucide="plus" aria-hidden="true"></i>
             </button>`}
           </div>
-          <label class="split-search" for="split-group-search">
-            <span class="split-search__label">${t('splitExpenses.searchGroups')}</span>
-            <span class="split-search__control">
-              <i data-lucide="search" aria-hidden="true"></i>
-              <input id="split-group-search" type="search" placeholder="${t('splitExpenses.searchGroups')}" autocomplete="off">
-            </span>
-          </label>
           <!-- Geteilter Umschalter-Baustein des Budget-Moduls statt eigener
                Pillen-Optik, und role="radiogroup" statt role="group": eine
                Einfachauswahl, die ihren Zustand ansagt und über die geteilte
@@ -181,13 +204,12 @@ export async function render(container, { user, embedded = false } = {}) {
           <div class="split-groups" id="split-groups"></div>
         </aside>
         <main class="split-main" id="split-main" aria-busy="true">${renderSkeletonList({ rows: 5, lines: 2 })}</main>
-      </div>
-      <button class="page-fab" id="split-fab" aria-label="${t('splitExpenses.addExpense')}" data-dock-label="${t('newLabel.splitExpenses')}">
-        <i data-lucide="plus" class="icon-xl" aria-hidden="true"></i>
-      </button>
+      </div>${fab}
     </div>
   `);
   if (window.lucide) lucide.createIcons({ el: _container });
+  // Eingebettet verdrahtet budget.js die Menues an seiner Seitenwurzel.
+  if (!embedded) installPopoverMenus(_container);
   await loadInitial();
   bindShell();
   renderAll();
@@ -372,16 +394,16 @@ function bindShell() {
   _container.querySelector('#split-add-group')?.addEventListener('click', () => openGroupModal());
   _container.querySelector('#split-add-expense')?.addEventListener('click', () => openExpenseModal());
   findPageFab('split-fab')?.addEventListener('click', () => openExpenseModal());
-  let groupSearchTimer;
-  _container.querySelector('#split-group-search')?.addEventListener('input', (e) => {
-    const value = e.target.value.trim();
-    clearTimeout(groupSearchTimer);
-    groupSearchTimer = setTimeout(async () => {
-      state.query = value;
+  // 250ms wie vorher: die Suche laedt die Gruppen vom Server neu.
+  wirePageSearch(_container, {
+    id: 'split-group-search',
+    delay: 250,
+    onQuery: async (value) => {
+      state.query = value.trim();
       await loadGroups();
       await loadGroupData();
       renderAll();
-    }, 250);
+    },
   });
   _statusTablist = wireTablist(_container.querySelector('#split-status-filter'), {
     activeId: state.groupStatus,
@@ -395,6 +417,9 @@ function bindShell() {
       renderAll();
     },
   });
+  // Gleitende Auswahl-Kapsel wie jede Segmentleiste (Kanon, Runde 7 D8).
+  const statusBar = _container.querySelector('#split-status-filter');
+  if (statusBar) attachSegmentIndicator(statusBar);
   _container.querySelector('#split-groups')?.addEventListener('click', async (e) => {
     const btn = e.target.closest('[data-group-id]');
     if (!btn) return;
@@ -428,6 +453,23 @@ function renderStatusFilter() {
   if (addExpense) addExpense.hidden = isArchivedView();
   const fab = findPageFab('split-fab');
   if (fab) fab.hidden = isArchivedView();
+  _onAddableChange?.();
+}
+
+/**
+ * Darf der Budget-Kopf gerade „Ausgabe hinzufuegen" anbieten? Nicht bei
+ * `budget: read` und nicht im Archiv - eine neue Ausgabe liefe dort in eine
+ * archivierte Gruppe. Dieselbe Regel, die den eigenstaendigen Knopf und FAB
+ * oben ausblendet; budget.js fragt sie, statt sie nachzubauen.
+ */
+export function canAddSplitExpense() {
+  return !readOnly() && !isArchivedView();
+}
+
+/** Der Anlegen-Weg aus dem Budget-FAB (#fab-new-budget, am Desktop im Kopf). */
+export function openNewSplitExpense() {
+  if (!canAddSplitExpense()) return;
+  openExpenseModal();
 }
 
 function renderSummary() {
@@ -439,16 +481,36 @@ function renderSummary() {
   // (Critique 2026-07-30, P0).
   // Rolle `total`: die Richtung steht im Label („Du bekommst" / „Du schuldest"),
   // nicht im Vorzeichen - deshalb der Ton explizit statt aus der Zahl.
+  // Die Zahl der Gruppen steht auch am Kopf der Liste, die sie zaehlt - mobil
+  // ist sie dort die einzige (split-expenses.css, R10 L11).
+  const count = _container.querySelector('#split-group-count');
+  if (count) count.textContent = String(state.groups.length);
+  const owedText = owed.length ? owed.map((r) => money(r.amount, r.currency)).join(' · ') : money(0, state.meta.default_currency);
+  const owingText = owing.length ? owing.map((r) => money(r.amount, r.currency)).join(' · ') : money(0, state.meta.default_currency);
+  const glance = _container.querySelector('#split-glance');
+  if (glance) {
+    const expanded = summary?.classList?.contains('is-expanded') ?? false;
+    setHtml(glance, metricGlanceHtml({
+      id: 'split-glance-more',
+      controls: 'split-summary',
+      expanded,
+      label: t('splitExpenses.youAreOwed'),
+      value: owedText,
+      tone: owed.length ? 'positive' : 'neutral',
+      flows: [{ label: t('splitExpenses.youOwe'), amount: owingText, tone: owing.length ? 'negative' : '' }],
+    }));
+    wireMetricGlance(glance, 'split-glance-more');
+  }
   setHtml(summary, `
     <div class="metric-card metric-card--positive">
       <div class="metric-card__label">${t('splitExpenses.youAreOwed')}</div>
-      <div class="metric-card__value">${owed.length ? owed.map((r) => money(r.amount, r.currency)).join(' · ') : money(0, state.meta.default_currency)}</div>
+      <div class="metric-card__value">${owedText}</div>
     </div>
     <div class="metric-card metric-card--negative">
       <div class="metric-card__label">${t('splitExpenses.youOwe')}</div>
-      <div class="metric-card__value">${owing.length ? owing.map((r) => money(r.amount, r.currency)).join(' · ') : money(0, state.meta.default_currency)}</div>
+      <div class="metric-card__value">${owingText}</div>
     </div>
-    <div class="metric-card">
+    <div class="metric-card split-summary-groups">
       <div class="metric-card__label">${isArchivedView() ? t('splitExpenses.statusArchived') : t('splitExpenses.activeGroups')}</div>
       <div class="metric-card__value">${state.groups.length}</div>
     </div>
@@ -483,6 +545,39 @@ function renderGroups() {
       </span>
     </button>
   `).join(''));
+}
+
+/**
+ * EIN Werkzeug-Menue fuer die Gruppe (Critique 2026-09-25, Muster „one tools
+ * menu" aus den Dokumenten und der Buchungsliste). Hier standen drei Icon-
+ * Knoepfe (Bearbeiten, Archivieren, Loeschen) und zwei Textknoepfe
+ * (Ausgleichen, Mitglied hinzufuegen) - bei 1440px zwei Zeilen im Gruppenkopf.
+ * Sichtbar bleibt die haeufige Handlung (Ausgleichen); der Rest traegt im Menue
+ * sein Label, Loeschen im Gefahrenton und als letzter Eintrag hinter einem
+ * Trenner. Die ids bleiben, die Verdrahtung in renderMain() haengt an ihnen.
+ * Ein Gast bekommt nur „Ausgleichen": die vier Eintraege hier verwalten die
+ * Gruppe, und das darf er nicht - dann faellt das Menue ganz.
+ */
+function groupToolsMenuHtml() {
+  if (isSplitGuest()) return '';
+  const label = t('common.moreActions');
+  const item = (id, icon, text, danger = false) => `
+      <button type="button" role="menuitem" class="popover-menu__item${danger ? ' popover-menu__item--danger' : ''}" id="${id}">
+        <i data-lucide="${icon}" class="icon-md" aria-hidden="true"></i><span>${esc(text)}</span>
+      </button>`;
+  return `
+    <button type="button" class="btn btn--secondary btn--icon split-group-tools popover-menu__trigger"
+            popovertarget="split-group-tools-menu" aria-haspopup="menu" aria-expanded="false"
+            aria-label="${esc(label)}" title="${esc(label)}">
+      <i data-lucide="ellipsis" class="icon-md" aria-hidden="true"></i>
+    </button>
+    <div class="popover-menu split-group-tools-menu" id="split-group-tools-menu" popover role="menu" aria-label="${esc(label)}">
+      ${item('split-invite', 'user-plus', t('splitExpenses.addMember'))}
+      ${item('split-edit-group', 'pencil', t('splitExpenses.editGroup'))}
+      ${item('split-archive-group', 'archive', t('splitExpenses.archiveGroup'))}
+      <div class="popover-menu__separator" role="separator"></div>
+      ${item('split-delete-group', 'trash-2', t('splitExpenses.deleteGroup'), true)}
+    </div>`;
 }
 
 function renderMain() {
@@ -528,29 +623,11 @@ function renderMain() {
           <i data-lucide="archive-restore" class="icon-md" aria-hidden="true"></i>
           ${t('splitExpenses.restoreGroup')}
         </button>` : `
-        ${isSplitGuest() ? '' : `
-        <button class="btn btn--secondary btn--icon" id="split-edit-group" aria-label="${t('splitExpenses.editGroup')}">
-          <i data-lucide="pencil" aria-hidden="true"></i>
-        </button>
-        <button class="btn btn--secondary btn--icon" id="split-archive-group" aria-label="${t('splitExpenses.archiveGroup')}">
-          <i data-lucide="archive" aria-hidden="true"></i>
-        </button>
-        <!-- Loeschen ist unumkehrbar (die Gruppe faellt mitsamt ihrer Ausgaben),
-             Bearbeiten/Archivieren nicht - dieselbe Kapsel fuer alle drei
-             verwischte den Unterschied. --danger-outline hebt sich ab, ohne die
-             Zeile zu dominieren; confirmModal({danger:true}) haengt schon
-             darunter (deleteGroup()). -->
-        <button class="btn btn--icon btn--danger-outline" id="split-delete-group" aria-label="${t('splitExpenses.deleteGroup')}">
-          <i data-lucide="trash-2" aria-hidden="true"></i>
-        </button>`}
         <button class="btn btn--secondary" id="split-settle">
           <i data-lucide="hand-coins" class="icon-md" aria-hidden="true"></i>
           ${t('splitExpenses.settle')}
         </button>
-        <button class="btn btn--secondary" id="split-invite" ${isSplitGuest() ? 'hidden' : ''}>
-          <i data-lucide="user-plus" class="icon-md" aria-hidden="true"></i>
-          ${t('splitExpenses.addMember')}
-        </button>`}
+        ${groupToolsMenuHtml()}`}
       </div>`}
     </section>
     <div class="split-content-grid">
@@ -596,7 +673,7 @@ function renderMain() {
     if (btn.dataset.expenseView) openExpenseReadView(expense);
     else openExpenseModal(expense);
   });
-  stagger(main.querySelectorAll('.split-expense, .split-debt, .split-activity-item'));
+  stagger(main.querySelectorAll('.split-expense, .split-debt, .split-activity-item'), { host: main });
 }
 
 // So viele Namen stehen in der Kopfzeile einer Gruppe, der Rest als „+N".
@@ -741,6 +818,29 @@ function restoredDetail(item) {
 }
 
 /**
+ * WELCHE AUSGABE (Re-Critique 2026-09-27, A5 P2-8 / R10 L11). Der Verlauf las
+ * fuenfmal „Ausgabe erstellt - Alex Johnson - 23.09.2026", ohne zu sagen,
+ * welche - daneben nannte „Letzte Ausgaben" das Objekt. Den Titel legt der
+ * Server beim Schreiben in die Metadaten (expense_*, recurring_created); den
+ * Betrag kennt die geladene Ausgabenliste der Gruppe. Eine geloeschte Ausgabe
+ * steht dort nicht mehr - dann bleibt der Titel allein, ein Betrag waere
+ * geraten. Ein Kommentar traegt keinen Titel; er nennt die Ausgabe, an der er
+ * haengt, sofern sie geladen ist.
+ */
+const EXPENSE_ACTIVITY = new Set(['expense_created', 'expense_edited', 'expense_deleted', 'comment_added', 'recurring_created']);
+
+function expenseDetail(item) {
+  if (!EXPENSE_ACTIVITY.has(item.type)) return '';
+  const expense = item.entity_type === 'expense' && item.entity_id != null
+    ? state.expenses.find((e) => e.id === Number(item.entity_id))
+    : null;
+  const title = item.metadata?.title || expense?.title;
+  if (!title) return '';
+  const sum = expense ? ` · ${money(expense.amount, expense.currency)}` : '';
+  return `<span class="split-activity-payment">${esc(`${title}${sum}`)}</span>`;
+}
+
+/**
  * Ein Eintrag des Verlaufs. Nachgeladene Seiten laufen durch dieselbe Funktion
  * und dieselbe Klick-Delegation am Verlauf - ein Storno-Knopf auf Seite drei
  * ist derselbe Knopf wie auf Seite eins.
@@ -754,7 +854,7 @@ function activityItemHtml(item, actionable) {
   const params = settlement ? paymentParams(settlement) : null;
   const detail = settlement
     ? `<span class="split-activity-payment">${esc(t('splitExpenses.paymentDetail', params))}</span>`
-    : restoredDetail(item);
+    : restoredDetail(item) || expenseDetail(item);
   const reversed = settlement?.reversed_at
     ? `<span class="split-activity-reversed">${esc(t('splitExpenses.paymentReversed'))}</span>`
     : '';
@@ -1264,7 +1364,7 @@ async function openGroupModal(group = null) {
         <label>${t('splitExpenses.currency')}<select class="input" name="default_currency">${state.meta.currencies.map((c) => `<option value="${c}" ${c === (group?.default_currency || currency) ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
         ${isEdit ? renderGroupMemberEditor(candidates) : ''}
         ${isEdit ? renderGroupDefaults(group) : ''}
-        <div class="modal-actions">
+        <div class="modal-panel__footer modal-panel__footer--plain">
           <button class="btn btn--secondary" type="button" id="split-cancel-group">${t('common.cancel')}</button>
           <button class="btn btn--primary" type="submit" id="split-save-group">${t('common.save')}</button>
         </div>
@@ -1403,10 +1503,14 @@ function openExpenseModal(expense = null, prefill = null) {
           hint: t('splitExpenses.receiptsHint'),
           icon: 'receipt',
         })}
-        <div class="modal-actions">
-          ${isEdit ? `<button class="btn btn--danger" type="button" id="split-delete-expense">${t('common.delete')}</button>` : ''}
-          <button class="btn btn--secondary" type="button" id="split-cancel-expense">${t('common.cancel')}</button>
-          <button class="btn btn--primary" type="submit" id="split-save-expense">${t('common.save')}</button>
+        <div class="modal-panel__footer modal-panel__footer--plain">
+          ${isEdit ? `<button class="btn btn--danger-outline" type="button" id="split-delete-expense" style="margin-inline-end:auto">
+            <i data-lucide="trash-2" class="icon-md" aria-hidden="true"></i>${t('common.delete')}
+          </button>` : ''}
+          <div class="split-form__footer-actions">
+            <button class="btn btn--secondary" type="button" id="split-cancel-expense">${t('common.cancel')}</button>
+            <button class="btn btn--primary" type="submit" id="split-save-expense">${t('common.save')}</button>
+          </div>
         </div>
       </form>
     `,
@@ -1514,7 +1618,7 @@ function openSettlementModal() {
           icon: 'receipt',
           maxItems: 1,
         })}
-        <div class="modal-actions">
+        <div class="modal-panel__footer modal-panel__footer--plain">
           <button class="btn btn--secondary" type="button" id="split-cancel-settlement">${t('common.cancel')}</button>
           <button class="btn btn--primary" type="submit" id="split-save-settlement">${t('splitExpenses.registerPayment')}</button>
         </div>
@@ -1592,10 +1696,12 @@ async function openMemberModal() {
       <form id="split-member-form" class="split-form">
         <label>${t('splitExpenses.member')}<select class="input" name="member_ref">${memberCandidateOptions(candidates)}</select></label>
         <label>${t('splitExpenses.role')}<select class="input" name="role"><option value="guest">${t('splitExpenses.roleGuest')}</option><option value="admin">${t('splitExpenses.roleAdmin')}</option></select></label>
-        <div class="modal-actions">
-          <button class="btn btn--secondary" type="button" id="split-new-guest">${t('splitExpenses.createGuest')}</button>
-          <button class="btn btn--secondary" type="button" id="split-cancel-member">${t('common.cancel')}</button>
-          <button class="btn btn--primary" type="submit" id="split-save-member">${t('common.save')}</button>
+        <div class="modal-panel__footer modal-panel__footer--plain">
+          <button class="btn btn--secondary" type="button" id="split-new-guest" style="margin-inline-end:auto">${t('splitExpenses.createGuest')}</button>
+          <div class="split-form__footer-actions">
+            <button class="btn btn--secondary" type="button" id="split-cancel-member">${t('common.cancel')}</button>
+            <button class="btn btn--primary" type="submit" id="split-save-member">${t('common.save')}</button>
+          </div>
         </div>
       </form>
     `,
@@ -1636,7 +1742,7 @@ function openGuestModal() {
         </div>
         <label>${t('splitExpenses.birthDate')}<input class="input" name="birth_date" type="text" placeholder="${dateInputPlaceholder()}" inputmode="numeric"></label>
         <p class="form-hint">${t('splitExpenses.guestSyncHint')}</p>
-        <div class="modal-actions">
+        <div class="modal-panel__footer modal-panel__footer--plain">
           <button class="btn btn--secondary" type="button" id="split-cancel-guest">${t('common.cancel')}</button>
           <button class="btn btn--primary" type="submit" id="split-save-guest">${t('splitExpenses.createAndAddGuest')}</button>
         </div>
@@ -1678,8 +1784,10 @@ function openGuestModal() {
  * den Seitencontainer; der Griff laesst den echten Pfad laufen.
  */
 export const __test = {
-  readOnly, renderExpenses, state, expenseReadSections, openExpenseModal, groupMetaHtml, openGroupModal,
+  readOnly, canAddSplitExpense, groupToolsMenuHtml, renderExpenses, state, expenseReadSections, openExpenseModal, groupMetaHtml, openGroupModal,
   renderActivity, onActivityClick, loadGroupData, loadMoreActivity, groupFromQuery,
   renderMainForTest(container) { _container = container; renderMain(); },
   renderGroupsForTest(container) { _container = container; renderGroups(); },
+  // R10 L11: die Gruppenzahl steht am Kopf der Liste (test-split-activity-ui.js).
+  renderSummaryForTest(container) { _container = container; renderSummary(); },
 };
