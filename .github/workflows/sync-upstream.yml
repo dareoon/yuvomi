@@ -1,0 +1,37 @@
+name: Sync fork with upstream
+
+on:
+  schedule:
+    # Daily at 11:00 UTC (08:00 BRT)
+    - cron: '0 11 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync-main:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out fork
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream main
+        run: |
+          git remote add upstream https://github.com/ulsklyc/yuvomi.git
+          git fetch upstream main
+
+      - name: Fast-forward fork main
+        run: |
+          git merge --ff-only upstream/main
+          git push origin HEAD:main
