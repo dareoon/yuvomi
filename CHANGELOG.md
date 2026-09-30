@@ -56,12 +56,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A switch that is off is easy to see, and in Arabic and Persian "on" sits on the left.** The
+  track of a switch that is off was a light grey that nearly vanished into its row, in light and
+  dark mode alike; it is now dark enough to stand out against every surface a switch appears on,
+  also while the pointer rests on the row. In right-to-left languages the knob now moves to the
+  left when a switch is on, as on iPhone and in the web installer. The installer's switches get
+  the same track colour.
+
+- **Members who may write to the meal plan can now edit and delete recipes somebody else added
+  (#1577).** Saving a recipe that another member had created failed with "Not authorized", even
+  for an admin, because editing and deleting were tied to whoever created the recipe. Recipes belong
+  to the household like tasks, shopping and notes: write access to the meal plan is what counts. A
+  member with read-only access still cannot change them, and recipes mirrored from Mealie or Tandoor
+  stay read-only for everybody. Deleting someone else's recipe looked like it worked because the row
+  disappears at once, but it came back after the undo window with the same error.
+
 - **Pairing a display in German says "Tablet", not "Tablett".** "Tablett" is a serving tray; the
   four strings of the display pairing now use the word the website and the README use.
 
 - **The app no longer looks up openweathermap.org on every load.** A leftover `dns-prefetch` hint
   made each browser resolve that name even with Open-Meteo as the weather source. Nothing in the
   browser talks to OpenWeatherMap directly: its icons come through Yuvomi's own server.
+
+- **The web installer's hints name the current places in the app's settings.** Since the settings
+  were reorganised in 2.70.0, four hints pointed to pages that no longer exist. The household
+  location is saved under Settings → Household → Integrations (was Settings → Integrations), SMTP is
+  managed under Settings → Household → Email (SMTP), the timezone is changed under Settings →
+  Account → Appearance, and further CalDAV accounts are added under Settings → Modules → Calendar,
+  in all 24 installer languages.
+
+- **A command-line restore refuses to run while Yuvomi is running** (#1530). `scripts/restore-backup.js`
+  replaced the database without knowing whether a server was working on it: the file changed under
+  the server's open connection, and the server kept writing to the old one. Yuvomi and the restore
+  now both hold a lock on `yuvomi.db.lock` next to the database. The restore stops with "Restore
+  refused" while a server holds it, and a server that starts during a command-line restore waits
+  until it has finished, with a log line every 30 seconds. A second server on the same database
+  waits the same way. The operating system drops the lock when the process ends, also after a
+  crash, so nothing is left to clean up. Do not delete `yuvomi.db.lock` while Yuvomi runs. If the
+  file cannot be created or locked, Yuvomi logs a warning and works as before; the lock does not
+  reach across machines (NFS with `nolock`) or from a Docker Desktop host into its containers.
+
+- **Changing a recurring payment for all future months no longer rewrites its first booking**
+  (#1035). The first entry of a series was also its template, so choosing "Change all future
+  occurrences" changed the title, amount, category, subcategory, account and responsible members of
+  a booking that could lie years back. Moving a rent series to a new account moved the rent of
+  January 2020 with it, and both account balances were wrong afterwards. A series now keeps its own
+  definition: the change applies to the series and to every entry from today on, while entries
+  already booked, the first one included, keep their values. Correcting only the first entry no
+  longer changes every future month either, and editing it now asks "only this or all future", like
+  every other entry of the series; switching "Recurring" off there still ends the series without
+  that question. Visibility still applies to the whole series on purpose: whoever
+  makes a series private means its past entries too. Existing series are carried over on update
+  without changing any entry.
 
 ## [2.70.0] - 2026-09-30
 
