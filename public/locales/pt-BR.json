@@ -326,6 +326,7 @@
         "nutritionNoTarget": "Ainda sem meta diária definida.",
         "nutritionEntries": "{{count}} registros hoje",
         "nutritionEntries_one": "{{count}} registro hoje",
+        "weatherUnavailable": "Clima indisponível no momento",
         "weekStripTitle": "Esta semana",
         "weekStripEmpty": "Nenhum evento nos próximos sete dias",
         "weekDayEvents": "{{count}} eventos",
