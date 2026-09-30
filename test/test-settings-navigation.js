@@ -1653,6 +1653,53 @@ test('weather geolocation callbacks only update the active leaf', () => {
   );
 });
 
+// Die Admin-Seite las nur die Datenbank: Wetter aus der `.env` (Web-Installer)
+// lief auf dem Dashboard, die Seite sagte "Nicht konfiguriert" und bot nichts
+// an. Die Quelle meldet jetzt der Server (`weather_source`), die Seite zeigt sie.
+test('admin weather page shows weather configured by the server', async () => {
+  const { weatherSourceOf, weatherSourceHtml, canRemoveStoredWeather } = await import('/settings/pages/admin-weather.js');
+
+  const env = weatherSourceOf({
+    weather_provider: null,
+    weather_source: { source: 'env', provider: 'open-meteo', lat: '52.52', lon: '13.4', city: 'Berlin', units: 'metric' },
+  });
+  const envHtml = weatherSourceHtml(env);
+  assert.match(envHtml, /settings\.weatherProviderOpenMeteoEnv/);
+  assert.doesNotMatch(envHtml, /settings\.weatherProviderNone/);
+  assert.match(envHtml, /Berlin \(52\.52, 13\.4\)/, 'Stadt und Koordinaten stehen schreibgeschuetzt da');
+  assert.match(envHtml, /settings\.weatherEnvHint\{"vars":"WEATHER_\*"\}/, 'der Weg zum Abschalten steht dabei');
+  assert.equal(canRemoveStoredWeather(env), false, 'die .env laesst sich hier nicht entfernen');
+
+  const owm = weatherSourceOf({
+    weather_source: { source: 'env', provider: 'openweathermap', lat: null, lon: null, city: 'Hamburg', units: 'metric' },
+  });
+  const owmHtml = weatherSourceHtml(owm);
+  assert.match(owmHtml, /settings\.weatherProviderOwm/);
+  assert.match(owmHtml, /settings\.weatherEnvHint\{"vars":"OPENWEATHER_\*"\}/);
+
+  // Koordinaten ohne Anbieter nimmt der Proxy auch - die Seite darf sie nicht
+  // "Nicht konfiguriert" nennen und muss sie entfernen lassen.
+  const stored = weatherSourceOf({
+    weather_provider: null,
+    weather_source: { source: 'db', provider: 'open-meteo', lat: '48.14', lon: '11.58', city: '', units: 'metric' },
+  });
+  assert.match(weatherSourceHtml(stored), /settings\.weatherProviderOpenMeteo\b(?!Env)/);
+  assert.doesNotMatch(weatherSourceHtml(stored), /weatherEnvHint/);
+  assert.equal(canRemoveStoredWeather(stored), true);
+
+  const none = weatherSourceOf({ weather_source: { source: 'none', provider: null } });
+  assert.match(weatherSourceHtml(none), /settings\.weatherProviderNone/);
+  assert.equal(canRemoveStoredWeather(none), false);
+
+  // Die Seite entscheidet den Vorrang nicht selbst: sie liest `weather_source`
+  // und nicht `weather_provider`, und das Entfernen loescht die Koordinaten
+  // mit - sonst kaeme die `.env` danach nie wieder zum Zug.
+  const source = await readFile(new URL('../public/settings/pages/admin-weather.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /preferences\.weather_provider\s*===/);
+  assert.match(source, /savePreferences\(\{ weather_provider: null, weather_lat: null, weather_lon: null, weather_city: '' \}\)/);
+  assert.match(source, /next\.source === 'env' \? t\('settings\.weatherRemovedEnv'\)/);
+});
+
 // Die Koordinatenvalidierung lag doppelt in admin-weather und personal-weather
 // (Critique 2026-07-27) und liegt jetzt einmal in weather-location.js.
 test('hasValidWeatherCoords rejects empty, non-numeric and out-of-range input', () => {
@@ -2035,6 +2082,161 @@ test('Belohnungen: das Punktefeld speichert wie die Schalter - ohne eigenen Knop
     globalThis.window = prevWindow;
     resetPreferencesCache();
   }
+});
+
+// ── #1516: Die Standard-Erinnerungsliste ohne freigegebene Liste und bei gescheiterter Abfrage ──
+
+/**
+ * Der Abschnitt `personal-tasks` mit Fake-Flaechen: das Markup kommt als Text
+ * an, was `createRetryState` als Knoten in die Karte haengt, landet in
+ * `appended`, und jedes per Id gefragte Element merkt sich seine Listener.
+ */
+function tasksDefaultsSheet() {
+  let html = '';
+  const appended = [];
+  const els = new Map();
+  const card = { appendChild(node) { appended.push(node); return node; } };
+  const el = (id) => {
+    if (!els.has(id)) {
+      const listeners = {};
+      els.set(id, {
+        id,
+        addEventListener(type, fn) { (listeners[type] ??= []).push(fn); },
+        async fire(type) {
+          const event = { type, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+          for (const fn of listeners[type] ?? []) await fn(event);
+          return event;
+        },
+      });
+    }
+    return els.get(id);
+  };
+  return {
+    appended,
+    get html() { return html; },
+    replaceChildren() { html = ''; appended.length = 0; els.clear(); },
+    insertAdjacentHTML(_pos, markup) { html += markup; },
+    querySelector(sel) {
+      if (sel === '.settings-card') return html.includes('class="settings-card"') ? card : null;
+      const id = sel.match(/^#([\w-]+)$/)?.[1];
+      return id && html.includes(`id="${id}"`) ? el(id) : null;
+    },
+  };
+}
+
+/** Gerade genug `document` fuer createRetryState (settings/components.js). */
+function fakeDocument() {
+  const createElement = (tag) => {
+    const listeners = {};
+    const attrs = new Map();
+    return {
+      tagName: tag.toUpperCase(), className: '', textContent: '', type: '', disabled: false, children: [],
+      appendChild(child) { this.children.push(child); return child; },
+      setAttribute(name, value) { attrs.set(name, String(value)); },
+      getAttribute(name) { return attrs.get(name) ?? null; },
+      addEventListener(type, fn) { (listeners[type] ??= []).push(fn); },
+      async click() { for (const fn of listeners.click ?? []) await fn({ type: 'click' }); },
+      focus() {},
+    };
+  };
+  return { createElement };
+}
+
+const walkNodes = (nodes) => nodes.flatMap((node) => [node, ...walkNodes(node.children ?? [])]);
+
+async function withTasksDefaults({ preferences = {}, syncTargets }, run) {
+  const { render } = await import('/settings/pages/personal-tasks.js');
+  const { resetPreferencesCache } = await import('/settings/preferences-cache.js');
+  const prev = { window: globalThis.window, document: globalThis.document, error: console.error };
+  const navigations = [];
+  globalThis.window = { yuvomi: { showToast() {}, navigate: (href) => navigations.push(href) } };
+  globalThis.document = fakeDocument();
+  console.error = () => {};
+  const state = { syncTargets };
+  globalThis.__apiStub = {
+    get: async (url) => {
+      if (url === '/preferences') return { data: preferences };
+      if (url === '/tasks/sync-targets') {
+        if (state.syncTargets instanceof Error) throw state.syncTargets;
+        return { data: { caldav: state.syncTargets } };
+      }
+      return { data: null };
+    },
+  };
+  resetPreferencesCache();
+  try {
+    await run({ render, state, navigations });
+  } finally {
+    delete globalThis.__apiStub;
+    globalThis.window = prev.window;
+    globalThis.document = prev.document;
+    console.error = prev.error;
+    resetPreferencesCache();
+  }
+}
+
+const LIST = { accountId: 1, accountName: 'Nextcloud', listUrl: 'https://dav.example/tasks/', listName: 'Familie' };
+
+test('Standard-Erinnerungsliste: ohne freigegebene Liste sagt der Abschnitt, warum - und der Admin bekommt den Weg zur Freigabe (#1516)', async () => {
+  const admin = { role: 'admin' };
+  const member = { role: 'member' };
+  const sheet = findSettingsLeaf('/settings/modules/tasks', admin);
+  const releaseHref = settingsSectionUrl(sheet, 'sync-reminders');
+  assert.ok(settingsSheetSections(sheet, admin).some((section) => section.id === 'sync-reminders'),
+    'die Freigabestelle ist ein sichtbarer Abschnitt im Aufgabenblatt des Admins');
+  assert.ok(!settingsSheetSections(sheet, member).some((section) => section.id === 'sync-reminders'),
+    'fuer Mitglieder gibt es sie nicht - ein Link dorthin liefe ins Leere');
+
+  await withTasksDefaults({ syncTargets: [] }, async ({ render, navigations }) => {
+    const asAdmin = tasksDefaultsSheet();
+    await render(asAdmin, { user: admin });
+    assert.doesNotMatch(asAdmin.html, /id="tasks-default-target"/, 'kein Dropdown mit der einzigen Option "nur lokal"');
+    assert.match(asAdmin.html, /settings\.tasksDefaultTargetEmpty\b/, 'der Leerzustand steht da');
+    assert.ok(asAdmin.html.includes(`href="${releaseHref}"`), `der Admin bekommt den Weg zur Freigabe: ${asAdmin.html}`);
+    const event = await asAdmin.querySelector('#tasks-sync-reminders-link').fire('click');
+    assert.equal(event.defaultPrevented, true, 'der Link bleibt in der App');
+    assert.deepEqual(navigations, [releaseHref]);
+
+    const asMember = tasksDefaultsSheet();
+    await render(asMember, { user: member });
+    assert.match(asMember.html, /settings\.tasksDefaultTargetEmpty\b/);
+    assert.ok(!asMember.html.includes('section=sync-reminders'), 'kein Link auf einen Abschnitt, den das Mitglied nicht sieht');
+  });
+
+  // Der Leerzustand erklaert sich selbst: was eine Erinnerungsliste ist
+  // (CalDAV) und wer sie freigibt (ein Admin). Gemessen am Wortlaut der
+  // Referenz und der englischen Fassung - der Rest folgt ihnen per Uebersetzung.
+  for (const code of ['de', 'en']) {
+    const locale = JSON.parse(await readFile(new URL(`../public/locales/${code}.json`, import.meta.url), 'utf8'));
+    const rendered = `${locale.settings.tasksDefaultsDescription} ${locale.settings.tasksDefaultTargetEmpty}`;
+    assert.match(rendered, /CalDAV/, `${code}: sagt nicht, was eine Erinnerungsliste ist: ${rendered}`);
+    assert.match(rendered, /\badmin/i, `${code}: sagt nicht, wer sie freigibt: ${rendered}`);
+  }
+});
+
+test('Standard-Erinnerungsliste: eine gescheiterte Abfrage ist ein Fehler mit Ausweg, kein Leerzustand (#1516)', async () => {
+  const failure = Object.assign(new Error('Internal server error.'), { status: 500 });
+  // Mit gespeichertem Ziel: gerade dann waere "nichts freigegeben" eine falsche Behauptung.
+  await withTasksDefaults({
+    preferences: { tasks_default_target: 'caldav:1|https://dav.example/tasks/' },
+    syncTargets: failure,
+  }, async ({ render, state }) => {
+    const host = tasksDefaultsSheet();
+    await render(host, { user: { role: 'member' } });
+    assert.doesNotMatch(host.html, /settings\.tasksDefaultTargetEmpty\b/, 'der Leerzustand behauptet, es sei nichts freigegeben');
+    assert.doesNotMatch(host.html, /id="tasks-default-target"/, 'ohne Liste ist unbekannt, was zur Wahl stuende');
+    const nodes = walkNodes(host.appended);
+    const alert = nodes.find((node) => node.getAttribute?.('role') === 'alert');
+    assert.ok(alert, `kein Fehler zu sehen: ${host.html}`);
+    assert.equal(alert.textContent, 'settings.tasksDefaultTargetLoadError');
+    const retry = nodes.find((node) => node.tagName === 'BUTTON');
+    assert.ok(retry, 'und kein Ausweg');
+
+    state.syncTargets = [LIST];
+    await retry.click();
+    assert.match(host.html, /id="tasks-default-target"/, 'Erneut versuchen laedt die Listen und zeigt das Feld');
+    assert.equal(walkNodes(host.appended).some((node) => node.getAttribute?.('role') === 'alert'), false, 'der Fehler ist weg');
+  });
 });
 
 /* ==========================================================================
