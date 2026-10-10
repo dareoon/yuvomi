@@ -231,14 +231,19 @@ router.put('/:id', (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!id) return res.status(400).json({ error: 'Ungueltige Rezept-ID', code: 400 });
 
-    const existing = db.get().prepare('SELECT id, created_by, provider_account_id, meal_types FROM recipes WHERE id = ?').get(id);
+    const existing = db.get().prepare('SELECT id, provider_account_id, meal_types FROM recipes WHERE id = ?').get(id);
     if (!existing) return res.status(404).json({ error: 'Recipe not found', code: 404 });
+    // KEIN Besitzer-Riegel (#1577, Entscheidung 30.09.2026): Rezepte gehoeren
+    // dem Haushalt wie Aufgaben, Einkauf und Notizen. Wer das Modulrecht
+    // `meals: write` hat, bearbeitet und loescht jedes Rezept - das prueft der
+    // Modul-Riegel in server/index.js (moduleAccessVerdict), fuer Mitglieds-
+    // rechte und Token-Scopes; `meals: read` bleibt dort abgewiesen. `created_by`
+    // sagt nur, wer ein Rezept angelegt hat, nicht wer es aendern darf.
+    //
     // Mirror-Rezepte sind read-only: der Quell-Provider bleibt Quelle der
-    // Wahrheit für ihren Inhalt. Der Check steht vor der created_by-Prüfung,
-    // weil sonst genau der Nutzer, der den Provider-Account angelegt hat (und
-    // damit als created_by dieser Rezepte gilt), sie über die API editieren könnte.
-    if (existing.provider_account_id) return res.status(403).json({ error: 'Mirrored recipes are managed by their source provider and cannot be edited here.', code: 403 });
-    if (existing.created_by !== (req.authUserId || req.session.userId)) return res.status(403).json({ error: 'Not authorized.', code: 403 });
+    // Wahrheit für ihren Inhalt - fuer jeden, auch fuer den Nutzer, der den
+    // Provider-Account angelegt hat (und damit als created_by dieser Rezepte gilt).
+    if (existing.provider_account_id) return res.status(403).json({ error: 'Mirrored recipes are managed by their source provider and cannot be edited here.', code: 403, reason: 'recipe_mirrored' });
 
     const { ingredients = [] } = req.body;
 
@@ -372,13 +377,13 @@ router.delete('/:id', (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!id) return res.status(400).json({ error: 'Invalid recipe ID.', code: 400 });
 
-    const existing = db.get().prepare('SELECT id, created_by, provider_account_id FROM recipes WHERE id = ?').get(id);
+    const existing = db.get().prepare('SELECT id, provider_account_id FROM recipes WHERE id = ?').get(id);
     if (!existing) return res.status(404).json({ error: 'Recipe not found.', code: 404 });
-    // Siehe PUT /:id: Mirror-Rezepte lassen sich nur durch Löschen des
+    // Siehe PUT /:id: kein Besitzer-Riegel, das Modulrecht `meals: write`
+    // genuegt (#1577). Mirror-Rezepte lassen sich nur durch Löschen des
     // Provider-Accounts entfernen (DELETE /recipe-providers/accounts/:id), nicht
     // einzeln hier.
-    if (existing.provider_account_id) return res.status(403).json({ error: 'Mirrored recipes are managed by their source provider and cannot be deleted here.', code: 403 });
-    if (existing.created_by !== (req.authUserId || req.session.userId)) return res.status(403).json({ error: 'Not authorized.', code: 403 });
+    if (existing.provider_account_id) return res.status(403).json({ error: 'Mirrored recipes are managed by their source provider and cannot be deleted here.', code: 403, reason: 'recipe_mirrored' });
 
     const result = db.get().prepare('DELETE FROM recipes WHERE id = ?').run(id);
     if (result.changes === 0) return res.status(404).json({ error: 'Recipe not found', code: 404 });
@@ -463,7 +468,7 @@ router.post('/:id/to-shopping-list', (req, res) => {
     // Schreibrecht - als Mitglied wie als Token. Vor den 404ern, damit die
     // Antwort keine Rezept- und Listen-IDs bestaetigt.
     if (!mayWriteModule(req, 'shopping')) {
-      return res.status(403).json({ error: 'Write access to the shopping list is required.', code: 403 });
+      return res.status(403).json({ error: 'Write access to the shopping list is required.', code: 403, reason: 'cross_module_access' });
     }
 
     const id = parseInt(req.params.id, 10);
@@ -548,7 +553,7 @@ router.post('/:id/to-shopping-list', (req, res) => {
 router.put('/:id/ingredient-match', (req, res) => {
   try {
     if (!mayWriteModule(req, 'pantry')) {
-      return res.status(403).json({ error: 'Write access to the pantry is required.', code: 403 });
+      return res.status(403).json({ error: 'Write access to the pantry is required.', code: 403, reason: 'cross_module_access' });
     }
 
     const id = parseInt(req.params.id, 10);

@@ -5,22 +5,13 @@ import {
   t,
 } from '/i18n.js';
 import { esc } from '/utils/html.js';
+import { initials } from '/utils/initials.js';
 import { confirmModal } from '/components/modal.js';
 import { prefersInkText } from '/utils/contrast.js';
 
-function initials(name) {
-  if (!name) return '?';
-  return name
-    .split(' ')
-    .map((part) => part[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase();
-}
-
 function avatarHtml(user, className = 'settings-avatar') {
   const safeName = esc(user?.display_name || '');
-  const fallback = esc(initials(user?.display_name || ''));
+  const fallback = esc(initials(user?.display_name, '?'));
   const background = esc(user?.avatar_color) || 'var(--color-accent)';
   const inkClass = prefersInkText(user?.avatar_color) ? ' settings-avatar--ink' : '';
   return `
@@ -227,8 +218,8 @@ function renderTwoFactorSetup(card, setup) {
       </div>
       <div id="two-factor-error" class="form-error" role="alert" hidden></div>
       <div class="settings-form-actions">
-        <button type="submit" class="btn btn--primary">${t('settings.twoFactorConfirm')}</button>
         <button type="button" class="btn btn--secondary" id="two-factor-cancel">${t('common.cancel')}</button>
+        <button type="submit" class="btn btn--primary">${t('settings.twoFactorConfirm')}</button>
       </div>
     </form>
   `);
@@ -311,8 +302,8 @@ function askForCode(card, texts, onConfirm, onCancel) {
       </div>
       <div id="two-factor-error" class="form-error" role="alert" hidden></div>
       <div class="settings-form-actions">
-        <button type="submit" class="btn ${texts.danger ? 'btn--danger' : 'btn--primary'}">${esc(texts.confirm)}</button>
         <button type="button" class="btn btn--secondary" id="two-factor-cancel">${t('common.cancel')}</button>
+        <button type="submit" class="btn ${texts.danger ? 'btn--danger' : 'btn--primary'}">${esc(texts.confirm)}</button>
       </div>
     </form>
   `);
@@ -559,7 +550,9 @@ function renderPage(container, user, refreshFailed, accessNotice, oidcState, oid
             <input class="form-input" type="password" id="confirm-password" autocomplete="new-password" minlength="8" aria-describedby="password-error" required>
           </div>
           <div id="password-error" class="form-error" role="alert" hidden></div>
-          <button type="submit" class="btn btn--primary">${t('settings.savePassword')}</button>
+          <div class="settings-form-actions">
+            <button type="submit" class="btn btn--primary">${t('settings.savePassword')}</button>
+          </div>
         </form>
       </div>
 
@@ -826,3 +819,7 @@ export async function render(container, { user }) {
     throw error;
   }
 }
+
+// Der Avatar als Programm (test:initials): welche Zeichen ohne Bild auf der
+// Scheibe stehen.
+export const __test = { avatarHtml };

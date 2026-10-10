@@ -19,7 +19,7 @@ of inactivity otherwise). Download the generated `.env` before you close the tab
 
 ## Requirements
 
-- Node.js 22+, the version the repository targets and CI tests (the installer itself has zero npm dependencies - Node built-ins only)
+- Node.js 22+ (the installer itself has zero npm dependencies - Node built-ins only; running the app outside a container needs Node.js 22.14 or newer, see `engines` in `package.json`)
 - A container engine — either **Docker** with Compose v2, or **Podman** with the
   `podman compose` subcommand (4.1+) or the `podman-compose` package
 - The repository cloned locally
@@ -54,12 +54,12 @@ dedicated `podman-compose.yml` (SELinux `:Z` labels).
      - **Security keys** - `SESSION_SECRET` and `DB_ENCRYPTION_KEY` (pre-filled
        on a fresh install; existing keys are kept, see below)
      - **Weather** - Open-Meteo coordinates (no API key). They apply until a
-       household location is saved in the app (Settings → Integrations), which
+       household location is saved in the app (Settings → Household → Photos and weather), which
        then takes precedence
      - **Calendar** - Google Calendar, Outlook (Microsoft Graph) and Apple iCloud
        CalDAV, the last one marked *legacy*: the `.env` holds exactly one iCloud
        account, while further CalDAV accounts (Nextcloud, a second iCloud) are
-       added in the app under Settings → Calendar
+       added in the app under Settings → Modules → Calendar
      - **Email** - SMTP (`EMAIL_SMTP_*`, `EMAIL_FROM_*`); enables password-reset
        emails, email as a household notification channel, and sending a shopping
        list to a member; a port outside 1-65535 is refused on the spot. Values set
@@ -144,7 +144,7 @@ The Google Drive Documents fields configure OAuth only. `GOOGLE_DRIVE_CLIENT_ID`
 `GOOGLE_DRIVE_CLIENT_SECRET` are optional paired overrides; when both are empty, the runtime reuses
 `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. `GOOGLE_DRIVE_REDIRECT_URI` is always Drive-specific
 and must exactly match `/api/v1/documents/storage/google-drive/callback`. After installation, connect
-and test Drive in **Settings → Documents**, then explicitly select it. OAuth
+and test Drive in **Settings → Modules → Documents**, then explicitly select it. OAuth
 success alone never changes the upload destination.
 
 > SQLite/database backups do not contain document binaries stored in a local folder, on WebDAV, or
@@ -152,17 +152,17 @@ success alone never changes the upload destination.
 
 ## Localization
 
-The wizard is fully localized into all 24 languages supported by the app and
+The wizard is fully localized into all 26 languages supported by the app and
 detects the browser language automatically (`de` is the reference locale, `en`
 the fallback). Translations live in `tools/installer/locales/*.json` and are
 loaded by `i18n-mini.js`, which mirrors the app's locale resolution.
 
 The **CLI installer** (`install.sh` at the repo root) is localized into the same
-24 languages. It detects the language from the shell environment
+26 languages. It detects the language from the shell environment
 (`OIKOS_INSTALLER_LANG` > `LC_ALL` > `LC_MESSAGES` > `LANG`) and accepts a
 `--lang <code>` override. Its strings live in `tools/installer/locales/cli/<lang>.sh`
 — one sourced shell file per language that sets `MSG_*` variables; `en.sh` is the
-fallback base, the active language overlays it. Key parity across all 24 files is
+fallback base, the active language overlays it. Key parity across all 26 files is
 enforced by `test-installer-cli-i18n.js`, which also checks that every value is a
 `printf` format matching its call site (each value is passed to `printf` as the
 format string, so a stray `%` or a wrong `%s` count is a runtime bug).

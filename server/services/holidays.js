@@ -97,16 +97,26 @@ async function getCountries() {
  * eine gemeinsame Landesliste (Schottland kennt z. B. keinen Ostermontag,
  * Nordirland zwei zusaetzliche Feiertage), daher werden sie hier synthetisch
  * als Subdivisionen gefuehrt statt die API zu befragen.
+ *
+ * DIE NAMEN FOLGEN DER SPRACHE DES LESERS (#1723), nicht der Datensprache des
+ * Haushalts: die Liste fuellt ein Auswahlfeld und wird nie gespeichert. Ohne
+ * `locale` bleibt es bei Englisch, und was OpenHolidays in der gewuenschten
+ * Sprache nicht fuehrt, kommt ueber resolveName ebenfalls englisch. Die drei
+ * britischen Nationen haben nur ihren englischen Namen.
  * @param {string} countryIsoCode z.B. 'DE'
+ * @param {string|null} [locale] eine unterstuetzte App-Sprache ('de', 'pt-BR');
+ *   der Aufrufer prueft sie (supportedLocaleFor), hier wird nichts validiert
  * @returns {Promise<Array<{isoCode: string, name: string}>>}
  */
-async function getSubdivisions(countryIsoCode) {
+async function getSubdivisions(countryIsoCode, locale = null) {
   if (countryIsoCode === 'GB') return GB_SUBDIVISIONS.slice();
   const raw = await apiFetch(`/Subdivisions?countryIsoCode=${encodeURIComponent(countryIsoCode)}`);
+  // OpenHolidays fuehrt Namen je SPRACHE, nicht je Locale: `pt-BR` fragt nach PT.
+  const langCode = typeof locale === 'string' && locale ? locale.split('-')[0].toUpperCase() : undefined;
   return (raw ?? []).map((s) => ({
     isoCode: s.isoCode ?? s.code,
-    name: resolveName(s.name) || s.shortName || s.isoCode || s.code,
-  })).sort((a, b) => a.name.localeCompare(b.name));
+    name: resolveName(s.name, langCode) || s.shortName || s.isoCode || s.code,
+  })).sort((a, b) => a.name.localeCompare(b.name, locale || undefined));
 }
 
 /**
@@ -781,7 +791,11 @@ async function syncNow(force = false) {
   // Eintraege; sie fallen unter genau diese Zusage, und `resolveHouseholdLocale`
   // ist die eine Stelle, die sie beantwortet - dieselbe, aus der Geburtstage,
   // Darlehensraten und Benachrichtigungen ihre Sprache holen.
-  const langCode = resolveHouseholdLocale(db.get()).toUpperCase();
+  //
+  // Nur der Sprachteil: die Namen tragen `PT`, nicht `PT-BR` - bei der API wie
+  // im lokalen Fallback. Eine Datensprache mit Region (pt-BR, #1437) fiele
+  // sonst an jedem Namen vorbei auf Englisch.
+  const langCode = resolveHouseholdLocale(db.get()).split('-')[0].toUpperCase();
 
   // WAS DEN INHALT DES CACHES BESTIMMT, IST MEHR ALS DIE SPRACHE: Sprache,
   // Land, Region und welche Ebenen ueberhaupt geholt werden. Genau diese vier

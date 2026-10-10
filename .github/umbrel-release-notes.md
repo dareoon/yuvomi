@@ -1,10 +1,12 @@
-<!-- version: 2.69.1 -->
-This is a security update and updating is recommended. It closes two places where an ordinary household member could reach further than their role allows.
+<!-- version: 2.75.0 -->
+This update adds pocket money and reworks how many pages are laid out and operated.
 
-Only admins can manage CardDAV contact accounts now. Until this release, a member could change the server address of a household CardDAV account, and the next sync sent the stored credentials to that server. Members keep reading and editing contacts as before.
+Rewards can now hold pocket money: a money balance per child, separate from points, credited weekly or monthly on a day you choose. A child asks for a deposit or a withdrawal, a parent confirms it, and only the child and the parents see the balance. Recurring shared expenses have a place of their own: a group lists them, and they can be edited, paused and resumed.
 
-The first single sign-on of a household member can no longer be steered by another member through their own profile email address. If you use SSO: a member whose account has a password and is not yet linked to SSO is no longer linked by email address. Their first SSO sign-in shows a message asking them to sign in with their password and link SSO under Settings, Account. Alternatively, an admin can switch the account to "SSO sign-in only" under Settings, Administration, Family. Accounts that are already linked are not affected.
+Many modules open on what you came for. The shift plan shows the plan before its master data, waste collection adds the recurring pickup with its main button, the budget tells planned from booked amounts, inventory opens on your things, and shared expenses show the figures of the group you are looking at. Dialogs now follow one pattern, with Cancel and the main button at the bottom right, and the settings list their options as rows that save the same way on every page. One settings page has a new name: "Integrations" is now "Photos and weather".
 
-There are no database changes in this update.
+On a phone, the calendar header shrinks to one row when you scroll, the document viewer uses the whole screen, and the budget month changes with a sideways swipe. On a desktop, filters in Tasks open beside the list instead of over it, and net worth, statistics and several lists use the width of the window. Lists, detail columns and the date picker move the same way everywhere.
 
-Full release notes are available at https://github.com/ulsklyc/yuvomi/releases/tag/v2.69.1
+The update runs one database migration on first start, which adds the pocket-money balance to Rewards. No existing entry is changed and no action is needed; as always, a backup before updating is a good idea.
+
+Full release notes are available at https://github.com/ulsklyc/yuvomi/releases/tag/v2.75.0

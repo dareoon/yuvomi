@@ -6,8 +6,8 @@
 import express from 'express';
 import { createLogger } from '../../logger.js';
 import * as db from '../../db.js';
-import { str, oneOf, date as validateDate, num, rrule, collectErrors, MAX_TITLE, MONTH_RE } from '../../middleware/validate.js';
-import { normalizeBudgetVisibility } from '../../services/budget-visibility.js';
+import { str, oneOf, date as validateDate, num, rrule, MAX_TITLE, MONTH_RE } from '../../middleware/validate.js';
+import { normalizeBudgetVisibility, BUDGET_MASKED_CATEGORY } from '../../services/budget-visibility.js';
 import { todayKey } from '../../utils/timezone.js';
 import { foldSearchText } from '../../services/search.js';
 import { sendDocumentDeletionConflict } from '../../services/document-deletion-lock.js';
@@ -21,6 +21,8 @@ import {
   validCategoryKeys, defaultCategory, validateSubcategory, validateAccountRef,
   entryWithLoanMeta, refreshLoanStatus, fromBudgetAmount, bookingFor,
   RESPONSIBLE_USERS_SQL, replaceResponsibles, withResponsibles, responsibleNonMembers,
+  replaceSeriesResponsibles, seedSeriesResponsibles, materializeSeriesStart, freezeSeriesPast,
+  refusal, refusals, refuse,
 } from './helpers.js';
 import { nonMemberMessage } from '../../services/household-members.js';
 
@@ -37,7 +39,7 @@ const router = express.Router();
 function intervalCountCheck(value) {
   const n = Number(value);
   if (!Number.isInteger(n) || n < 1 || n > MAX_INTERVAL_COUNT) {
-    return { value: null, error: `Intervall-Anzahl muss zwischen 1 und ${MAX_INTERVAL_COUNT} liegen.` };
+    return { value: null, error: `Interval count must be between 1 and ${MAX_INTERVAL_COUNT}.` };
   }
   return { value: n, error: null };
 }
@@ -61,7 +63,7 @@ router.get('/summary', (req, res) => {
     const month = req.query.month || todayKey(db.get()).slice(0, 7);
 
     if (!MONTH_RE.test(month))
-      return res.status(400).json({ error: 'month muss YYYY-MM sein', code: 400 });
+      return res.status(400).json({ error: 'month must be in YYYY-MM format.', code: 400 });
 
     const from = `${month}-01`;
     const to   = `${month}-31`;
@@ -231,7 +233,7 @@ router.get('/', (req, res) => {
     const loanId = req.query.loan_id ? parseInt(req.query.loan_id, 10) : null;
 
     if (!loanId && !MONTH_RE.test(month))
-      return res.status(400).json({ error: 'month muss YYYY-MM sein', code: 400 });
+      return res.status(400).json({ error: 'month must be in YYYY-MM format.', code: 400 });
 
     if (!loanId) generateRecurringInstances(db.get(), month);
 
@@ -260,9 +262,19 @@ router.get('/', (req, res) => {
       params.push(from, to);
     }
 
-    if (req.query.category && validCategoryKeys().includes(req.query.category)) {
-      sql += ' AND b.category = ?';
-      params.push(req.query.category);
+    // GEFILTERT WIRD AUF DIE MASKIERTE KATEGORIE (#659), nicht auf die Spalte.
+    // Fremde 'shared_amount'-Zeilen tragen in der Antwort '__private__'; ein
+    // Filter auf die echte Spalte liesse sie trotzdem genau unter ihrer echten
+    // Kategorie erscheinen, und die Treffermenge verriete den Zweck, den die
+    // Maske verbirgt. Wie in Summary und Statistik laufen sie deshalb unter dem
+    // Sammel-Bucket - und der ist hier auch filterbar, damit jede Zeile der
+    // Kategorie-Aufschluesselung einen Drilldown hat. Der Bind des Ausdrucks
+    // steht an seiner Stelle im WHERE, also VOR dem Vergleichswert.
+    const categoryKey = req.query.category;
+    if (categoryKey && (categoryKey === BUDGET_MASKED_CATEGORY || validCategoryKeys().includes(categoryKey))) {
+      const catExpr = budgetCategoryExpr(req, 'b');
+      sql += ` AND ${catExpr.expr} = ?`;
+      params.push(...catExpr.params, categoryKey);
     }
 
     if (req.query.account_id) {
@@ -282,8 +294,13 @@ router.get('/', (req, res) => {
     sql += ' ORDER BY b.date DESC, b.created_at DESC';
 
     const entries = db.get().prepare(sql).all(...params).map(withResponsibles);
+    const masked = maskEntries(req, withAttachments(entries, documentViewer(req)));
+    // Der Darlehens-Drilldown filtert auf eine Verknuepfung, und die nimmt die
+    // Maske einer fremden 'shared_amount'-Rate weg (#659). Auf die maskierte
+    // Sicht gefiltert passt eine solche Rate deshalb zu keinem Darlehen - sonst
+    // verriete die Treffermenge, wofuer das Geld war.
     res.json({
-      data: maskEntries(req, withAttachments(entries, documentViewer(req))),
+      data: loanId ? masked.filter((row) => !row.details_hidden) : masked,
     });
   } catch (err) {
     log.error('', err);
@@ -294,7 +311,7 @@ router.get('/', (req, res) => {
 function searchEntries(req, res) {
   const raw = String(Array.isArray(req.query.q) ? req.query.q[0] : req.query.q).trim();
   if (!raw || raw.length > LEDGER_SEARCH_MAX_LENGTH) {
-    return res.status(400).json({ error: `q muss 1-${LEDGER_SEARCH_MAX_LENGTH} Zeichen haben`, code: 400 });
+    return res.status(400).json({ error: `q must be 1-${LEDGER_SEARCH_MAX_LENGTH} characters long.`, code: 400 });
   }
   const needle = foldSearchText(raw);
   let sql = `
@@ -341,28 +358,35 @@ function searchEntries(req, res) {
  */
 router.post('/', (req, res) => {
   try {
-    const vTitle  = str(req.body.title,    'Titel',  { max: MAX_TITLE });
-    const vAmount = num(req.body.amount,  'Betrag', { required: true });
+    const vTitle  = str(req.body.title,    'Title',  { max: MAX_TITLE });
+    const vAmount = num(req.body.amount,  'Amount', { required: true });
     const fallbackCategory = defaultCategory(Number(req.body.amount) < 0 ? 'expense' : 'income');
-    const vCat    = oneOf(req.body.category || fallbackCategory, validCategoryKeys(), 'Kategorie');
-    const vDate   = validateDate(req.body.date,   'Datum',  true);
-    const vRrule  = rrule(req.body.recurrence_rule, 'Wiederholung');
-    const vInterval = oneOf(req.body.recurrence_interval || 'monthly', RECURRENCE_INTERVAL_KEYS, 'Intervall');
+    const vCat    = oneOf(req.body.category || fallbackCategory, validCategoryKeys(), 'Category');
+    const vDate   = validateDate(req.body.date,   'Date',  true);
+    const vRrule  = rrule(req.body.recurrence_rule, 'recurrence_rule');
+    const vInterval = oneOf(req.body.recurrence_interval || 'monthly', RECURRENCE_INTERVAL_KEYS, 'Interval');
     const vCount = req.body.recurrence_interval_count !== undefined
       ? intervalCountCheck(req.body.recurrence_interval_count)
       : { value: 1, error: null };
-    const errors  = collectErrors([vTitle, vAmount, vCat, vDate, vRrule, vInterval, vCount]);
-    if (errors.length) return res.status(400).json({ error: errors.join(' '), code: 400 });
+    const errors  = [
+      ...refusals('entry_title_invalid', [vTitle]),
+      ...refusals('entry_amount_invalid', [vAmount]),
+      ...refusals('entry_category_invalid', [vCat]),
+      ...refusals('entry_date_invalid', [vDate]),
+      ...refusals('entry_recurrence_invalid', [vRrule, vInterval]),
+      ...refusals('entry_interval_count_invalid', [vCount]),
+    ];
+    if (errors.length) return refuse(res, errors);
     const subcategory = validateSubcategory(vCat.value, req.body.subcategory);
     if (subcategory === null) {
-      return res.status(400).json({ error: 'Invalid subcategory.', code: 400 });
+      return refuse(res, [refusal('entry_subcategory_invalid', 'Invalid subcategory.')]);
     }
 
     const accountRef = validateAccountRef(req.body.account_id);
-    if (accountRef.error) return res.status(400).json({ error: accountRef.error, code: 400 });
+    if (accountRef.error) return refuse(res, [refusal('entry_account_invalid', accountRef.error)]);
     // Zustaendig nur Haushaltsmitglieder (#1207).
     const strangers = responsibleNonMembers(null, req.body.responsible_user_ids);
-    if (strangers.length) return res.status(400).json({ error: nonMemberMessage(strangers), code: 400 });
+    if (strangers.length) return refuse(res, [refusal('entry_responsible_invalid', nonMemberMessage(strangers))]);
 
     // Intervall + virtuelles Budget nur für wiederkehrende Einträge.
     const isRecurring = req.body.is_recurring ? 1 : 0;
@@ -402,6 +426,9 @@ router.post('/', (req, res) => {
     replaceAttachments(result.lastInsertRowid, req.body.attachment_document_ids, documentViewer(req));
     // Zustaendige (#1057) - ein Etikett neben der Buchung, keine Forderung.
     replaceResponsibles(result.lastInsertRowid, req.body.responsible_user_ids);
+    // Eine neue Serie ist ihre eigene Vorlage (#1035): die Werte legt der
+    // Trigger aus v228 an, die Zustaendigen kommen erst hier dazu.
+    if (isRecurring) seedSeriesResponsibles(result.lastInsertRowid);
 
     const entry = entryWithLoanMeta(result.lastInsertRowid);
 
@@ -416,10 +443,13 @@ router.post('/', (req, res) => {
 
 /**
  * PUT /api/v1/budget/:id/series
- * Aktualisiert das Serien-Original und löscht zukünftige Instanzen (ab aktuellem Monat),
- * sodass sie beim nächsten Monatsaufruf mit den neuen Werten neu erzeugt werden.
- * Body: wie PUT /:id (date wird ignoriert – das Datum des Originals bleibt erhalten)
- * Response: { data: Parent-Entry }
+ * Ändert eine Serie "für alle künftigen": ihre Definition (budget_series) und
+ * jede Buchung der Serie ab heute (Haushaltszone). Was davor liegt, ist gebucht
+ * und bleibt - die erste Buchung eingeschlossen (#1035). Einzige Ausnahme ist
+ * die Sichtbarkeit, die bewusst für die ganze Serie gilt.
+ * Body: wie PUT /:id, dazu optional start_date (YYYY-MM-DD, der Starttag der
+ * Serie, #1545). `date` wird ignoriert: es ist das Datum einer Buchung.
+ * Response: { data: Anker-Buchung + series: Definition | null }
  */
 router.put('/:id/series', (req, res) => {
   try {
@@ -429,20 +459,33 @@ router.put('/:id/series', (req, res) => {
     if (!mayEdit(req, entry)) return res.status(403).json({ error: 'You cannot modify this entry.', code: 403 });
 
     const parentId = entry.recurrence_parent_id ?? (entry.is_recurring ? entry.id : null);
-    if (!parentId) return res.status(400).json({ error: 'Not a recurring entry.', code: 400 });
+    if (!parentId) return refuse(res, [refusal('entry_not_recurring', 'Not a recurring entry.')]);
 
     const parent = db.get().prepare('SELECT * FROM budget_entries WHERE id = ?').get(parentId);
     if (!parent) return res.status(404).json({ error: 'Series parent not found', code: 404 });
 
+    // DIE VORLAGE IST DIE DEFINITION, NICHT DIE ERSTE BUCHUNG (#1035). Bis v227
+    // war der Anker beides, und diese Route schrieb Titel, Betrag, Kategorie,
+    // Unterkategorie, Konto und Zustaendige per `WHERE id = parentId` auf eine
+    // Buchung, die Jahre zurueckliegen konnte - die Miete von 2020 zog auf das
+    // neue Konto um. Fehlt die Definition, ist die Serie beendet; dann bleibt
+    // der Anker die Grundlage, wie bei jedem Neubeginn (Trigger aus v228).
+    const series = db.get().prepare('SELECT * FROM budget_series WHERE anchor_id = ?').get(parentId);
+    const base = series ?? {
+      title: parent.title, amount: parent.amount, full_amount: parent.recurrence_full_amount,
+      category: parent.category, subcategory: parent.subcategory,
+    };
+
     const checks = [];
-    if (req.body.title    !== undefined) checks.push(str(req.body.title,    'Titel',  { max: MAX_TITLE, required: false }));
-    if (req.body.amount   !== undefined) checks.push(num(req.body.amount,   'Betrag'));
-    if (req.body.category !== undefined) checks.push(oneOf(req.body.category, validCategoryKeys(), 'Kategorie'));
-    if (req.body.recurrence_rule !== undefined) checks.push(rrule(req.body.recurrence_rule, 'Wiederholung'));
-    if (req.body.recurrence_interval !== undefined) checks.push(oneOf(req.body.recurrence_interval, RECURRENCE_INTERVAL_KEYS, 'Intervall'));
-    if (req.body.recurrence_interval_count !== undefined) checks.push(intervalCountCheck(req.body.recurrence_interval_count));
-    const errors = collectErrors(checks);
-    if (errors.length) return res.status(400).json({ error: errors.join(' '), code: 400 });
+    if (req.body.title    !== undefined) checks.push(['entry_title_invalid', str(req.body.title,    'Title',  { max: MAX_TITLE, required: false })]);
+    if (req.body.amount   !== undefined) checks.push(['entry_amount_invalid', num(req.body.amount,   'Amount')]);
+    if (req.body.category !== undefined) checks.push(['entry_category_invalid', oneOf(req.body.category, validCategoryKeys(), 'Category')]);
+    if (req.body.recurrence_rule !== undefined) checks.push(['entry_recurrence_invalid', rrule(req.body.recurrence_rule, 'recurrence_rule')]);
+    if (req.body.recurrence_interval !== undefined) checks.push(['entry_recurrence_invalid', oneOf(req.body.recurrence_interval, RECURRENCE_INTERVAL_KEYS, 'Interval')]);
+    if (req.body.recurrence_interval_count !== undefined) checks.push(['entry_interval_count_invalid', intervalCountCheck(req.body.recurrence_interval_count)]);
+    if (req.body.start_date !== undefined) checks.push(['entry_start_date_invalid', validateDate(req.body.start_date, 'start_date', true)]);
+    const errors = checks.flatMap(([reason, result]) => refusals(reason, [result]));
+    if (errors.length) return refuse(res, errors);
     // EINE SERIEN-AENDERUNG BEENDET DIE SERIE NICHT (#1546).
     //
     // `is_recurring: false` hiess hier "Serie beenden, jedes Vorkommen ab heute
@@ -460,22 +503,23 @@ router.put('/:id/series', (req, res) => {
     // PUT /budget/:id mit is_recurring: false an der ersten Buchung (so beendet
     // der Dialog eine Serie) oder DELETE /budget/:id/series.
     if (req.body.is_recurring !== undefined && !req.body.is_recurring) {
-      return res.status(400).json({
-        error: 'A series edit cannot end the series. To end it, set is_recurring to false on its first entry (PUT /budget/:id) or delete it (DELETE /budget/:id/series).',
-        code: 400,
-      });
+      return refuse(res, [refusal(
+        'series_end_refused',
+        'A series edit cannot end the series. To end it, set is_recurring to false on its first entry (PUT /budget/:id) or delete it (DELETE /budget/:id/series).',
+      )]);
     }
-    // Neu nur Haushaltsmitglieder (#1207), gegen den Stand der Serie.
-    const strangers = responsibleNonMembers(parentId, req.body.responsible_user_ids);
-    if (strangers.length) return res.status(400).json({ error: nonMemberMessage(strangers), code: 400 });
+    // Neu nur Haushaltsmitglieder (#1207), gegen den Stand der Serie - ihrer
+    // Definition, nicht ihrer ersten Buchung (#1035).
+    const strangers = responsibleNonMembers(parentId, req.body.responsible_user_ids, { series: true });
+    if (strangers.length) return refuse(res, [refusal('entry_responsible_invalid', nonMemberMessage(strangers))]);
 
     const { title, amount, category, subcategory: requestedSubcategory, is_recurring, recurrence_rule } = req.body;
-    const finalTitle    = title     !== undefined ? title.trim()                        : parent.title;
-    const finalAmount   = amount    !== undefined ? Number(amount)                     : parent.amount;
-    const finalCategory = category  !== undefined ? category                           : parent.category;
+    const finalTitle    = title     !== undefined ? title.trim()                        : base.title;
+    const finalAmount   = amount    !== undefined ? Number(amount)                     : base.amount;
+    const finalCategory = category  !== undefined ? category                           : base.category;
     const finalSubcat   = requestedSubcategory !== undefined
-      ? (validateSubcategory(finalCategory, requestedSubcategory) ?? parent.subcategory)
-      : parent.subcategory;
+      ? (validateSubcategory(finalCategory, requestedSubcategory) ?? base.subcategory)
+      : base.subcategory;
     const finalRecurring = is_recurring !== undefined ? (is_recurring ? 1 : 0) : parent.is_recurring;
     const finalInterval  = req.body.recurrence_interval !== undefined
       ? req.body.recurrence_interval
@@ -503,17 +547,20 @@ router.put('/:id/series', (req, res) => {
         ? cents(shareFromOccurrence
           ? finalAmount * 12 / occurrencesPerYear(finalInterval, finalCount)
           : finalAmount)
-        : (parent.recurrence_full_amount ?? parent.amount))
+        : (base.full_amount ?? base.amount))
       : null;
     const storeAmount    = shareFromOccurrence
       ? cents(finalAmount)
       : (finalVirtual ? effectiveMonthly(finalFull, finalInterval, finalCount) : finalAmount);
     const finalRrule     = recurrence_rule !== undefined ? (recurrence_rule || null) : parent.recurrence_rule;
 
-    // Sichtbarkeit ist eine Serien-Eigenschaft (#476/#505): eine Änderung wirkt auf
-    // Parent UND alle bereits materialisierten Instanzen, sonst blieben Alt-Instanzen
-    // auf dem alten Wert (privat→geteilt = Leak). Künftige Instanzen werden gelöscht
-    // und erben den neuen Wert bei der Neu-Generierung (generateRecurringInstances).
+    // SICHTBARKEIT GILT BEWUSST RUECKWIRKEND, fuer die ganze Serie (#476/#505,
+    // Entscheidung in #1035). Anders als die Werte oben ist sie keine Tatsache
+    // ueber eine einzelne Buchung, sondern eine Aussage ueber die Serie: wer sie
+    // privat stellt, meint auch ihre alten Buchungen, und eine private Serie,
+    // deren Vergangenheit im Haushalt sichtbar bliebe, waere die Ueberraschung
+    // (privat->geteilt waere dazu ein Leck in die andere Richtung). Sie trifft
+    // deshalb die Definition, den Anker und JEDE Instanz ohne Datumsschnitt.
     const nextVisibility = req.body.visibility !== undefined
       ? normalizeBudgetVisibility(req.body.visibility)
       : null;
@@ -524,16 +571,14 @@ router.put('/:id/series', (req, res) => {
     // nachtragen und "alle künftigen ändern" wählen: die Route ignorierte das Feld und
     // löschte die Instanz gleich darauf mit weg.
     //
-    // Anders als die Sichtbarkeit wirkt sie NICHT auf bereits vergangene Instanzen.
-    // Sichtbarkeit muss rückwirkend gelten, weil ein zu weiter Alt-Wert ein Leck ist;
-    // ein Konto ist eine Tatsache über eine bereits erfolgte Abbuchung. Die künftigen
-    // erben den neuen Wert ohnehin, weil sie unten gelöscht und von
-    // generateRecurringInstances neu erzeugt werden.
+    // Anders als die Sichtbarkeit wirkt sie NICHT auf bereits vergangene Buchungen -
+    // auch nicht auf die erste (#1035). Ein Konto ist eine Tatsache über eine bereits
+    // erfolgte Abbuchung.
     const accountProvided = req.body.account_id !== undefined;
     let accountValue = null;
     if (accountProvided) {
       const accountRef = validateAccountRef(req.body.account_id);
-      if (accountRef.error) return res.status(400).json({ error: accountRef.error, code: 400 });
+      if (accountRef.error) return refuse(res, [refusal('entry_account_invalid', accountRef.error)]);
       accountValue = accountRef.value;
     }
 
@@ -544,8 +589,7 @@ router.put('/:id/series', (req, res) => {
     // liegt die Buchung vom 1. bereits hinter uns, wurde aber mitgeloescht und
     // aus dem Original neu erzeugt. Solange nur Titel und Betrag wanderten, fiel
     // das kaum auf; seit das Konto mitkommt, zieht eine bereits erfolgte
-    // Abbuchung auf ein anderes Konto um und verfaelscht dessen Saldo. Der Fehler
-    // war schon da, dieser PR macht ihn wirksam - also faellt er hier mit.
+    // Abbuchung auf ein anderes Konto um und verfaelscht dessen Saldo.
     // Nebenbei bleiben damit die Belege vergangener Buchungen erhalten, die die
     // CASCADE bisher mitnahm (siehe #583 weiter unten).
     //
@@ -556,30 +600,108 @@ router.put('/:id/series', (req, res) => {
     // Tag, den die Kontoansicht bereits als vergangen fuehrt - und erzeugt ihn
     // mit dem neuen Konto neu. Dieselbe Zone auf beiden Seiten, sonst ist der
     // Schnitt eine andere Grenze als die, an der die Zahlen abgelesen werden.
+    //
+    // Der Schnitt gilt fuer JEDE Buchung der Serie gleich, die erste
+    // eingeschlossen (#1035): sie ist eine gewoehnliche Buchung. Liegt sie
+    // selbst noch vor uns (die Serie beginnt naechsten Monat), zieht sie mit.
     const cutoffDate = todayKey(db.get());
+    const anchorAhead = parent.date >= cutoffDate;
+
+    // DER STARTTAG GEHOERT DER DEFINITION (#1545). Er aendert sich nur, wenn
+    // die Anfrage ihn ausdruecklich als `start_date` nennt - nie ueber `date`:
+    // das ist das Datum der Buchung, an der der Dialog offen war, und Clients
+    // haben es hier jahrelang mitgeschickt, weil diese Route es ignorierte.
+    // Ein neuer Starttag verschiebt das Raster und wird deshalb wie ein
+    // geaenderter Rhythmus behandelt (Schritt 4). Die erste Buchung zieht mit,
+    // solange sie selbst noch vor uns liegt - wie ihre Werte in Schritt 2.
+    const currentStart = series?.start_date ?? parent.date;
+    const finalStart   = req.body.start_date !== undefined ? req.body.start_date : currentStart;
+    const startChanged = finalStart !== currentStart;
+    // NICHT VOR DEN MONAT DER GEBUCHTEN ERSTEN BUCHUNG. Der Monatsaufruf laesst
+    // nur den Monat des Starttags aus - er gehoert der ersten Buchung. Laege
+    // der Starttag einen Monat frueher, entstuende in ihrem Monat ein zweites
+    // Vorkommen neben ihr, und davor Buchungen, die es vor dem Beginn der
+    // Serie nie gab (Review-Befund in #1585). Im selben Monat ist der Tag frei
+    // ("ab jetzt am 4. statt am 5."); liegt die erste Buchung noch vor uns,
+    // zieht sie ohnehin mit.
+    if (startChanged && !anchorAhead && finalStart.slice(0, 7) < parent.date.slice(0, 7)) {
+      return refuse(res, [refusal(
+        'series_start_too_early',
+        'The start day of a series cannot lie in a month before its first entry once that entry is booked.',
+      )]);
+    }
+
+    // Verschieben sich die Termine (Rhythmus oder Starttag)? Dann gilt ab heute
+    // ein neues Raster - Schritt 0 und 4.
+    const rhythmChanged = finalInterval !== parent.recurrence_interval
+      || finalCount !== parent.recurrence_interval_count
+      || finalVirtual !== parent.recurrence_virtual
+      || finalRrule !== parent.recurrence_rule
+      || finalRecurring !== parent.is_recurring
+      || startChanged;
 
     db.get().transaction(() => {
+      // 0. DIE VERGANGENHEIT EINFRIEREN, solange das alte Raster noch gilt
+      //    (Entscheidung in #1585). Ab Schritt 4 entsteht vor heute nichts mehr
+      //    (grid_from); ein Monat, der nie aufgeschlagen wurde, bekommt seine
+      //    Vorkommen deshalb jetzt - auf dem alten Raster, mit den Werten der
+      //    Definition vor dieser Aenderung. Ohne Definition (beendete Serie,
+      //    die hier neu beginnt) gibt es kein altes Raster.
+      if (rhythmChanged && series) freezeSeriesPast(db.get(), parentId, cutoffDate);
+
+      // 1. Der Anker: Rhythmus und Serienschalter immer - sie haben nur eine
+      //    Bedeutung. Beendet `is_recurring = 0` die Serie, raeumt der Trigger
+      //    aus v228 die Definition ab; ein Neubeginn legt sie aus dem Anker an
+      //    und bekommt in Schritt 3 die Werte dieser Anfrage.
       db.get().prepare(`
         UPDATE budget_entries SET
-          title                  = ?,
-          amount                 = ?,
-          category               = ?,
-          subcategory            = ?,
-          is_recurring           = ?,
-          recurrence_rule        = ?,
-          recurrence_interval    = ?,
+          is_recurring              = ?,
+          recurrence_rule           = ?,
+          recurrence_interval       = ?,
           recurrence_interval_count = ?,
-          recurrence_virtual     = ?,
-          recurrence_confirm     = ?,
-          recurrence_full_amount = ?,
-          visibility             = COALESCE(?, visibility),
-          account_id             = CASE WHEN ? = 1 THEN ? ELSE account_id END
+          recurrence_virtual        = ?,
+          recurrence_confirm        = ?,
+          visibility                = COALESCE(?, visibility)
         WHERE id = ?
-      `).run(finalTitle, storeAmount, finalCategory, finalSubcat,
-             finalRecurring, finalRrule, finalInterval, finalCount, finalVirtual,
-             finalConfirm, finalFull, nextVisibility,
-             accountProvided ? 1 : 0, accountValue, parentId);
+      `).run(finalRecurring, finalRrule, finalInterval, finalCount, finalVirtual,
+             finalConfirm, nextVisibility, parentId);
 
+      // 2. Seine WERTE nur, wenn er noch nicht gebucht ist - und mit ihnen
+      //    sein Datum, wenn der Starttag sich aendert (#1545).
+      if (anchorAhead) {
+        db.get().prepare(`
+          UPDATE budget_entries SET
+            title                  = ?,
+            amount                 = ?,
+            category               = ?,
+            subcategory            = ?,
+            recurrence_full_amount = ?,
+            account_id             = CASE WHEN ? = 1 THEN ? ELSE account_id END,
+            date                   = CASE WHEN ? = 1 THEN ? ELSE date END
+          WHERE id = ?
+        `).run(finalTitle, storeAmount, finalCategory, finalSubcat, finalFull,
+               accountProvided ? 1 : 0, accountValue,
+               startChanged ? 1 : 0, finalStart, parentId);
+      }
+
+      // 3. Die Definition - die Vorlage fuer jedes Vorkommen, das noch entsteht.
+      db.get().prepare(`
+        UPDATE budget_series SET
+          title       = ?,
+          amount      = ?,
+          full_amount = ?,
+          category    = ?,
+          subcategory = ?,
+          visibility  = COALESCE(?, visibility),
+          account_id  = CASE WHEN ? = 1 THEN ? ELSE account_id END,
+          start_date  = ?,
+          updated_at  = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+        WHERE anchor_id = ?
+      `).run(finalTitle, storeAmount, finalFull, finalCategory, finalSubcat, nextVisibility,
+             accountProvided ? 1 : 0, accountValue, finalStart, parentId);
+
+      // 4. Die vorhandenen Instanzen ab heute.
+      //
       // LÖSCHEN NUR, WENN SICH DIE TERMINE VERSCHIEBEN.
       //
       // Bis hierher war der einzige Weg, künftige Instanzen an eine geänderte
@@ -587,27 +709,33 @@ router.put('/:id/series', (req, res) => {
       // Das ist richtig, wenn sich der Rhythmus ändert - dann liegen die
       // Termine anderswo. Für eine reine Wertänderung ist es zu grob: die
       // Zeilen verlieren ihre Identität, ihre Belege gehen über die CASCADE
-      // mit (#583), und sie kommen mit allem zurück, was am Original steht -
-      // auch mit einem Konto, das sie vorher bewusst nicht hatten.
+      // mit (#583), und sie kommen mit allem zurück, was an der Definition
+      // steht - auch mit einem Konto, das sie vorher bewusst nicht hatten.
       //
       // Ändert sich nur ein Wert, werden die vorhandenen Zeilen deshalb
       // aktualisiert statt ersetzt. Der Schnitt bleibt derselbe: was vor
       // heute liegt, ist gebucht und wird nicht mehr angefasst.
-      const rhythmChanged = finalInterval !== parent.recurrence_interval
-        || finalCount !== parent.recurrence_interval_count
-        || finalVirtual !== parent.recurrence_virtual
-        || finalRrule !== parent.recurrence_rule
-        || finalRecurring !== parent.is_recurring;
-
       if (rhythmChanged) {
         db.get().prepare(`
           DELETE FROM budget_entries WHERE recurrence_parent_id = ? AND date >= ?
         `).run(parentId, cutoffDate);
+        // Das neue Raster gilt ab heute, auch fuer den Monatsaufruf: davor
+        // steht der Bestand auf dem alten (Schritt 0), und ein Vorkommen auf
+        // dem neuen daneben waere eine zweite Buchung fuer denselben Zeitraum
+        // (Review-Befund in #1585). Siehe occurrenceWriter().
+        db.get().prepare('UPDATE budget_series SET grid_from = ? WHERE anchor_id = ?')
+          .run(cutoffDate, parentId);
+        // Ein verlegter Starttag bei schon gebuchter erster Buchung: das
+        // Vorkommen am neuen Starttag legt kein Monatsaufruf an (siehe
+        // materializeSeriesStart), also hier - wenn es ab heute liegt.
+        if (startChanged && !anchorAhead && finalStart >= cutoffDate) {
+          materializeSeriesStart(db.get(), parentId);
+        }
       } else {
-        // `account_id` folgt derselben CASE-Form wie am Original: ein nicht
-        // mitgesendetes Feld lässt die Zuordnung in Ruhe. Eine virtuelle Serie
-        // gibt ihr Konto nicht weiter - ihre Instanzen sind Planwerte, und
-        // `generateRecurringInstances` hält es genauso.
+        // `account_id` folgt derselben CASE-Form wie an der Definition: ein
+        // nicht mitgesendetes Feld lässt die Zuordnung in Ruhe. Eine virtuelle
+        // Serie gibt ihr Konto nicht weiter - ihre Instanzen sind Planwerte,
+        // und `generateRecurringInstances` hält es genauso.
         db.get().prepare(`
           UPDATE budget_entries SET
             title       = ?,
@@ -623,6 +751,7 @@ router.put('/:id/series', (req, res) => {
                parentId, cutoffDate);
       }
 
+      // 5. Sichtbarkeit: jede Instanz, ohne Schnitt (siehe nextVisibility).
       if (nextVisibility) {
         db.get().prepare(`
           UPDATE budget_entries SET visibility = ? WHERE recurrence_parent_id = ?
@@ -637,11 +766,11 @@ router.put('/:id/series', (req, res) => {
     //
     // DIE ZUSTAENDIGKEIT DAGEGEN GEHOERT DER SERIE (#1057): "wer kuemmert sich
     // um die Wasserrechnung" ist keine Eigenschaft des einzelnen Monats. Sie
-    // folgt deshalb denselben Schnitt wie Titel und Betrag daneben - ab
-    // cutoffDate, also ab heute. Eine bereits materialisierte Instanz aus der
-    // Vergangenheit behaelt, wer damals zustaendig war; wer die Rechnung
-    // uebernimmt, uebernimmt sie nicht rueckwirkend. Gemessen: Juni-Instanz
-    // bleibt bei der alten Person, Dezember zieht nach.
+    // folgt deshalb demselben Schnitt wie Titel und Betrag daneben - ab
+    // cutoffDate, also ab heute: in die Definition, in jede Buchung ab heute,
+    // und in den Anker nur, wenn er selbst noch vor uns liegt (#1035). Eine
+    // bereits gebuchte Buchung behaelt, wer damals zustaendig war; wer die
+    // Rechnung uebernimmt, uebernimmt sie nicht rueckwirkend.
     //
     // WAS DER SCHNITT NICHT LEISTET, und das gilt fuer jedes Serienfeld gleich:
     // ein Monat, der noch NIE geoeffnet wurde, hat noch keine Instanz. Sie
@@ -651,7 +780,8 @@ router.put('/:id/series', (req, res) => {
     // neuen Titel saehe.
     if (req.body.responsible_user_ids !== undefined) {
       db.get().transaction(() => {
-        replaceResponsibles(parentId, req.body.responsible_user_ids);
+        replaceSeriesResponsibles(parentId, req.body.responsible_user_ids);
+        if (anchorAhead) replaceResponsibles(parentId, req.body.responsible_user_ids);
         const future = db.get().prepare(
           'SELECT id FROM budget_entries WHERE recurrence_parent_id = ? AND date >= ?'
         ).all(parentId, cutoffDate);
@@ -660,7 +790,15 @@ router.put('/:id/series', (req, res) => {
     }
 
     const updated = entryWithLoanMeta(parentId);
-    res.json({ data: { ...updated, attachments: attachmentsFor(parentId, documentViewer(req)) } });
+    const definition = db.get().prepare(`
+      SELECT title, amount, full_amount, category, subcategory, account_id, visibility, start_date
+        FROM budget_series WHERE anchor_id = ?
+    `).get(parentId) ?? null;
+    res.json({ data: {
+      ...updated,
+      series: definition,
+      attachments: attachmentsFor(parentId, documentViewer(req)),
+    } });
   } catch (err) {
     log.error('PUT /budget/:id/series error:', err);
     res.status(500).json({ error: 'Internal error', code: 500 });
@@ -680,7 +818,7 @@ router.delete('/:id/series', (req, res) => {
     if (!mayEdit(req, entry)) return res.status(403).json({ error: 'You cannot modify this entry.', code: 403 });
 
     const parentId = entry.recurrence_parent_id ?? (entry.is_recurring ? entry.id : null);
-    if (!parentId) return res.status(400).json({ error: 'Not a recurring entry.', code: 400 });
+    if (!parentId) return refuse(res, [refusal('entry_not_recurring', 'Not a recurring entry.')]);
 
     db.get().transaction(() => {
       db.get().prepare('DELETE FROM budget_entries WHERE recurrence_parent_id = ?').run(parentId);
@@ -708,18 +846,18 @@ router.put('/:id', (req, res) => {
     if (!mayEdit(req, entry)) return res.status(403).json({ error: 'You cannot modify this entry.', code: 403 });
 
     const checks = [];
-    if (req.body.title    !== undefined) checks.push(str(req.body.title,    'Titel',  { max: MAX_TITLE, required: false }));
-    if (req.body.amount   !== undefined) checks.push(num(req.body.amount,   'Betrag'));
-    if (req.body.category !== undefined) checks.push(oneOf(req.body.category, validCategoryKeys(), 'Kategorie'));
-    if (req.body.date     !== undefined) checks.push(validateDate(req.body.date,    'Datum'));
-    if (req.body.recurrence_rule !== undefined) checks.push(rrule(req.body.recurrence_rule, 'Wiederholung'));
-    if (req.body.recurrence_interval !== undefined) checks.push(oneOf(req.body.recurrence_interval, RECURRENCE_INTERVAL_KEYS, 'Intervall'));
-    if (req.body.recurrence_interval_count !== undefined) checks.push(intervalCountCheck(req.body.recurrence_interval_count));
-    const errors = collectErrors(checks);
-    if (errors.length) return res.status(400).json({ error: errors.join(' '), code: 400 });
+    if (req.body.title    !== undefined) checks.push(['entry_title_invalid', str(req.body.title,    'Title',  { max: MAX_TITLE, required: false })]);
+    if (req.body.amount   !== undefined) checks.push(['entry_amount_invalid', num(req.body.amount,   'Amount')]);
+    if (req.body.category !== undefined) checks.push(['entry_category_invalid', oneOf(req.body.category, validCategoryKeys(), 'Category')]);
+    if (req.body.date     !== undefined) checks.push(['entry_date_invalid', validateDate(req.body.date,    'Date')]);
+    if (req.body.recurrence_rule !== undefined) checks.push(['entry_recurrence_invalid', rrule(req.body.recurrence_rule, 'recurrence_rule')]);
+    if (req.body.recurrence_interval !== undefined) checks.push(['entry_recurrence_invalid', oneOf(req.body.recurrence_interval, RECURRENCE_INTERVAL_KEYS, 'Interval')]);
+    if (req.body.recurrence_interval_count !== undefined) checks.push(['entry_interval_count_invalid', intervalCountCheck(req.body.recurrence_interval_count)]);
+    const errors = checks.flatMap(([reason, result]) => refusals(reason, [result]));
+    if (errors.length) return refuse(res, errors);
     // Neu nur Haushaltsmitglieder (#1207); wer schon zustaendig ist, bleibt es.
     const strangers = responsibleNonMembers(id, req.body.responsible_user_ids);
-    if (strangers.length) return res.status(400).json({ error: nonMemberMessage(strangers), code: 400 });
+    if (strangers.length) return refuse(res, [refusal('entry_responsible_invalid', nonMemberMessage(strangers))]);
     const { title, amount, category, subcategory: requestedSubcategory, date, is_recurring, recurrence_rule } = req.body;
     const linkedPayment = db.get().prepare(`
       SELECT * FROM budget_loan_payments WHERE budget_entry_id = ?
@@ -745,7 +883,7 @@ router.put('/:id', (req, res) => {
       : null;
     if (linkedPayment && amount !== undefined) {
       if (!(linkedPaymentAmount > 0)) {
-        return res.status(400).json({ error: 'Amount must be greater than zero.', code: 400 });
+        return refuse(res, [refusal('entry_amount_invalid', 'Amount must be greater than zero.')]);
       }
       const otherPaid = db.get().prepare(`
         SELECT COALESCE(SUM(amount), 0) AS total
@@ -753,7 +891,7 @@ router.put('/:id', (req, res) => {
         WHERE loan_id = ? AND id != ?
       `).get(linkedPayment.loan_id, linkedPayment.id).total;
       if (linkedPaymentAmount - (Number(linkedLoan?.total_amount || 0) - Number(otherPaid || 0)) > 0.005) {
-        return res.status(400).json({ error: 'Amount cannot be greater than the remaining loan amount.', code: 400 });
+        return refuse(res, [refusal('entry_amount_exceeds_loan', 'Amount cannot be greater than the remaining loan amount.')]);
       }
     }
     const nextCategory = category ?? entry.category;
@@ -761,7 +899,7 @@ router.put('/:id', (req, res) => {
       ? validateSubcategory(nextCategory, requestedSubcategory ?? entry.subcategory)
       : undefined;
     if (subcategory === null) {
-      return res.status(400).json({ error: 'Invalid subcategory.', code: 400 });
+      return refuse(res, [refusal('entry_subcategory_invalid', 'Invalid subcategory.')]);
     }
 
     // Konto-Zuordnung: undefined ⇒ unverändert; null/'' ⇒ Zuordnung entfernen; id ⇒ setzen.
@@ -769,7 +907,7 @@ router.put('/:id', (req, res) => {
     let accountValue = null;
     if (accountProvided) {
       const accountRef = validateAccountRef(req.body.account_id);
-      if (accountRef.error) return res.status(400).json({ error: accountRef.error, code: 400 });
+      if (accountRef.error) return refuse(res, [refusal('entry_account_invalid', accountRef.error)]);
       accountValue = accountRef.value;
     }
 
@@ -811,7 +949,26 @@ router.put('/:id', (req, res) => {
       assertDocumentLinkTargetsAvailable(db.get(), req.body.attachment_document_ids, documentViewer(req));
     }
 
+    // DER RHYTHMUS STEHT AM ANKER und gilt fuer die ganze Serie - auch wenn er
+    // hier, ueber "nur dieser Eintrag" an der ersten Buchung, geaendert wird.
+    // Das ist dieselbe Rasteraenderung wie ueber PUT /:id/series und bekommt
+    // dieselbe Behandlung (#1545, Entscheidung in #1585): Vergangenheit im
+    // alten Raster einfrieren, Vorkommen ab heute neu bauen, davor nichts mehr
+    // erzeugen. Bis hierher blieben vergangene und kuenftige Vorkommen im alten
+    // Raster stehen, und der Monatsaufruf legte die des neuen daneben.
+    const finalRrule = recurrence_rule !== undefined ? (recurrence_rule || null) : entry.recurrence_rule;
+    const runningSeries = entry.is_recurring && finalRecurring && entry.recurrence_parent_id == null
+      && db.get().prepare('SELECT 1 FROM budget_series WHERE anchor_id = ?').get(id);
+    const gridChanged = Boolean(runningSeries) && (
+      finalInterval !== entry.recurrence_interval
+      || finalCount !== entry.recurrence_interval_count
+      || finalVirtual !== entry.recurrence_virtual
+      || finalRrule !== entry.recurrence_rule);
+    const cutoffDate = gridChanged ? todayKey(db.get()) : null;
+
     const tx = db.get().transaction(() => {
+      if (gridChanged) freezeSeriesPast(db.get(), id, cutoffDate);
+
       db.get().prepare(`
         UPDATE budget_entries
         SET title                  = COALESCE(?, title),
@@ -836,7 +993,7 @@ router.put('/:id', (req, res) => {
         subcategory !== undefined ? subcategory : null,
         date ?? null,
         finalRecurring,
-        recurrence_rule !== undefined ? (recurrence_rule || null) : entry.recurrence_rule,
+        finalRrule,
         finalInterval,
         finalCount,
         finalVirtual,
@@ -861,6 +1018,12 @@ router.put('/:id', (req, res) => {
         );
         refreshLoanStatus(linkedPayment.loan_id);
       }
+
+      if (gridChanged) {
+        db.get().prepare('DELETE FROM budget_entries WHERE recurrence_parent_id = ? AND date >= ?')
+          .run(id, cutoffDate);
+        db.get().prepare('UPDATE budget_series SET grid_from = ? WHERE anchor_id = ?').run(cutoffDate, id);
+      }
     });
     tx();
 
@@ -873,6 +1036,14 @@ router.put('/:id', (req, res) => {
     // Dieselbe Zurueckhaltung wie bei den Belegen: nur anfassen, wenn das Feld
     // mitkommt (#1057). replaceResponsibles() prueft das selbst.
     replaceResponsibles(id, req.body.responsible_user_ids);
+    // Wird eine Einzelbuchung hier zur Serie, ist sie deren Vorlage (#1035) -
+    // die Werte uebernimmt der Trigger aus v228, die Zustaendigen dieser Aufruf.
+    // Eine Buchung, die schon Serie WAR, bleibt dagegen nur Buchung: ihre Werte
+    // aendern hier die erste Buchung, nicht die Definition - ihr Datum
+    // eingeschlossen, der Starttag steht in der Definition (#1545).
+    if (!entry.is_recurring && finalRecurring && entry.recurrence_parent_id == null) {
+      seedSeriesResponsibles(id);
+    }
 
     const updated = entryWithLoanMeta(id);
 
@@ -903,14 +1074,13 @@ router.patch('/:id/confirm', (req, res) => {
     if (!entry) return res.status(404).json({ error: 'Entry not found', code: 404 });
     if (!mayEdit(req, entry)) return res.status(403).json({ error: 'You cannot modify this entry.', code: 403 });
     if (!entry.is_pending) {
-      return res.status(400).json({ error: 'Entry is already booked.', code: 400 });
+      return refuse(res, [refusal('entry_already_booked', 'Entry is already booked.')]);
     }
 
-    const checks = [];
-    if (req.body.amount !== undefined) checks.push(num(req.body.amount, 'Betrag'));
-    if (req.body.date   !== undefined) checks.push(validateDate(req.body.date, 'Datum'));
-    const errors = collectErrors(checks);
-    if (errors.length) return res.status(400).json({ error: errors.join(' '), code: 400 });
+    const errors = [];
+    if (req.body.amount !== undefined) errors.push(...refusals('entry_amount_invalid', [num(req.body.amount, 'Amount')]));
+    if (req.body.date   !== undefined) errors.push(...refusals('entry_date_invalid', [validateDate(req.body.date, 'Date')]));
+    if (errors.length) return refuse(res, errors);
 
     // Das Vorzeichen bleibt: eine erwartete Ausgabe wird beim Abbuchen nicht zur
     // Einnahme, auch wenn jemand den Betrag ohne Minus einträgt.

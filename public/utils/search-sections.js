@@ -12,9 +12,9 @@
  *        Servers pruefen kann (dieselben Schluessel, keiner zu viel oder zu
  *        wenig).
  *
- * Ein Ziel ohne `?open=` fuehrt auf die Modulseite: Dokumente, Vorrat,
- * Geburtstage und Budget kennen (Stand 2026-09-27) keinen Tiefenlink auf einen
- * einzelnen Eintrag.
+ * Ein Ziel ohne `?open=` fuehrt auf die Modulseite: Dokumente, Vorrat und
+ * Budget kennen keinen Tiefenlink auf einen einzelnen Eintrag. Geburtstage
+ * kennen ihn seit #1821 (`/birthdays?open=<id>`: Spalte oder Leseblatt).
  */
 
 /**
@@ -22,7 +22,7 @@
  * @property {string} bucket    Schluessel in der Antwort des Servers
  * @property {string} labelKey  Ueberschrift (i18n)
  * @property {string} module    Navigations-Modul: Siegel, Kachel, Sichtbarkeit
- * @property {(item: object) => string} route
+ * @property {(item: object, fmt?: object) => string} route
  * @property {(item: object, fmt: object) => string} [label]
  * @property {(item: object, fmt: object) => string} [meta]
  */
@@ -34,7 +34,14 @@ export const SEARCH_SECTIONS = Object.freeze([
   { bucket: 'tasks', labelKey: 'nav.tasks', module: 'tasks',
     route: (i) => `/tasks?open=${i.id}`, meta: dateMeta('due_date') },
   { bucket: 'events', labelKey: 'nav.calendar', module: 'calendar',
-    route: (i) => `/calendar?open=${i.id}`,
+    // DER LINK TRAEGT DEN TAG DES TREFFERS (#1607). Ohne ihn faellt der Kalender
+    // auf den Start der Stammzeile zurueck - bei einem Geburtstag das
+    // Geburtsjahr. Der Server liefert fuer eine Serie ihren naechsten Termin
+    // (`eventSearchWindow`), und genau dessen Tag oeffnet der Link.
+    route: (i, fmt) => {
+      const day = i.start_datetime && fmt?.dateKey ? fmt.dateKey(i.start_datetime) : '';
+      return day ? `/calendar?open=${i.id}&date=${day}` : `/calendar?open=${i.id}`;
+    },
     meta: (i, fmt) => (i.start_datetime
       ? `${fmt.formatDate(i.start_datetime)}${i.all_day ? '' : ` · ${fmt.formatTime(i.start_datetime)}`}`
       : '') },
@@ -51,7 +58,7 @@ export const SEARCH_SECTIONS = Object.freeze([
   { bucket: 'documents', labelKey: 'nav.documents', module: 'documents', route: () => '/documents' },
   { bucket: 'inventory', labelKey: 'nav.inventory', module: 'inventory',
     route: (i) => `/inventory?open=${i.id}`, meta: (i) => [i.brand, i.model].filter(Boolean).join(' ') },
-  { bucket: 'birthdays', labelKey: 'nav.birthdays', module: 'birthdays', route: () => '/birthdays' },
+  { bucket: 'birthdays', labelKey: 'nav.birthdays', module: 'birthdays', route: (i) => `/birthdays?open=${i.id}` },
   { bucket: 'budget', labelKey: 'nav.budget', module: 'budget', route: () => '/budget?tab=budget', meta: dateMeta('date') },
   { bucket: 'waste', labelKey: 'nav.waste', module: 'waste', route: (i) => `/waste?type=${i.id}` },
 ]);

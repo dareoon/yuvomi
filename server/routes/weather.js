@@ -12,6 +12,7 @@ import express from 'express';
 import * as db from '../db.js';
 import { utcDateKey } from '../utils/timezone.js';
 import { resolveWeatherSource } from '../services/weather-source.js';
+import { supportedLocaleFor } from '../utils/i18n.js';
 
 const log = createLogger('Weather');
 
@@ -57,10 +58,93 @@ function cityParam(city) {
 }
 
 // ----------------------------------------------------------------
-// Factory used by tests to inject a custom fetch function and cfgGet.
+// OpenWeatherMap-Sprachcodes (#1523)
+//
+// OWM hat eigene Codes, nicht BCP-47: Koreanisch heisst `kr`, Tschechisch `cz`,
+// Brasilianisch `pt_br`. Vorher ging `lang` unveraendert hinaus, und eine
+// App-Sprache, die OWM anders schreibt, bekam Englisch oder eine falsche
+// Variante.
+//
+// Die Liste ist die der Anbieter-Doku, abgeschrieben am 2026-10-01 von
+// https://openweathermap.org/current#multi (die 5-Tage-Vorhersage unter
+// /forecast5 fuehrt dieselbe). `la` ist dort Lettisch, nicht Latein, und `sp`
+// steht neben `es` - deshalb gilt ein App-Code NIE schon darum, weil er in
+// dieser Liste vorkommt, sondern nur ueber die Zuordnung darunter.
+// ----------------------------------------------------------------
+export const OWM_LANGUAGES = new Set([
+  'sq', 'af', 'ar', 'az', 'eu', 'be', 'bg', 'ca', 'zh_cn', 'zh_tw', 'hr', 'cz',
+  'da', 'nl', 'en', 'fi', 'fr', 'gl', 'de', 'el', 'he', 'hi', 'hu', 'is', 'id',
+  'it', 'ja', 'kr', 'ku', 'la', 'lt', 'mk', 'no', 'fa', 'pl', 'pt', 'pt_br',
+  'ro', 'ru', 'sr', 'sk', 'sl', 'sp', 'es', 'sv', 'se', 'th', 'tr', 'ua', 'uk',
+  'vi', 'zu',
+]);
+
+// Jede App-Sprache steht hier, auch die gleich geschriebenen: eine neue
+// Locale-Datei ohne Zeile macht test:language-lists rot, statt still auf
+// Englisch zu fallen. `null` heisst: OWM uebersetzt diese Sprache nicht, bewusst
+// Englisch (bzw. OPENWEATHER_LANG).
+export const OWM_LANG_BY_LOCALE = Object.freeze({
+  ar: 'ar',
+  cs: 'cz',
+  de: 'de',
+  el: 'el',
+  en: 'en',
+  es: 'es',
+  fa: 'fa',
+  fil: null,
+  fr: 'fr',
+  hi: 'hi',
+  hu: 'hu',
+  id: 'id',
+  it: 'it',
+  ja: 'ja',
+  ko: 'kr',
+  nb: 'no',
+  nl: 'nl',
+  pl: 'pl',
+  pt: 'pt',
+  'pt-BR': 'pt_br',
+  ru: 'ru',
+  sv: 'sv',
+  tr: 'tr',
+  uk: 'uk',
+  vi: 'vi',
+  zh: 'zh_cn',
+});
+
+/**
+ * Der OWM-Code fuer einen eingehenden Sprachwert, oder null. Der Client schickt
+ * seine App-Locale; OPENWEATHER_LANG ist laut Doku ein OWM-Code (`zh_tw` muss
+ * dort weiter gehen). Darum: erst die App-Locale, dann ein OWM-Code wie
+ * geschrieben, zuletzt ein Tag mit Region (`de-AT` -> `de`). Was nichts davon
+ * ist, geht nicht in die URL.
+ */
+export function owmLanguage(raw) {
+  if (typeof raw !== 'string') return null;
+  const value = raw.trim();
+  if (Object.hasOwn(OWM_LANG_BY_LOCALE, value)) return OWM_LANG_BY_LOCALE[value];
+  if (OWM_LANGUAGES.has(value.toLowerCase())) return value.toLowerCase();
+  const locale = supportedLocaleFor(value);
+  return locale && Object.hasOwn(OWM_LANG_BY_LOCALE, locale) ? OWM_LANG_BY_LOCALE[locale] : null;
+}
+
+// ----------------------------------------------------------------
+// Warum eine Antwort ohne Wetter kommt - maschinenlesbar, damit der Client
+// "nicht eingerichtet" (Kachel gibt es nicht) von "eingerichtet, aber gerade
+// gescheitert" (Kachel bleibt stehen und sagt es) unterscheiden kann. Vorher
+// sahen beide gleich aus, `{ data: null }`, und die Kachel verschwand bei einem
+// Anbieterfehler aus dem Raster UND aus der Anpassen-Ablage.
+// ----------------------------------------------------------------
+export const WEATHER_REASON = Object.freeze({
+  NOT_CONFIGURED: 'not_configured',
+  UPSTREAM_ERROR: 'upstream_error',
+});
+
+// ----------------------------------------------------------------
+// Factory used by tests to inject a custom fetch function, cfgGet and logger.
 // The router exported as default uses real global fetch + real DB.
 // ----------------------------------------------------------------
-export function buildRouter({ cfgGet: cfgGetFn = cfgGet, fetchFn = null } = {}) {
+export function buildRouter({ cfgGet: cfgGetFn = cfgGet, fetchFn = null, logger = log } = {}) {
   const router = express.Router();
   // Der Cache haengt am Router, nicht am Modul. Im Betrieb ist das derselbe eine
   // Cache wie zuvor (es gibt genau einen Router), in Tests aber der Unterschied
@@ -78,6 +162,32 @@ export function buildRouter({ cfgGet: cfgGetFn = cfgGet, fetchFn = null } = {}) 
     return cfgGetFn(key);
   }
 
+  // EINE LOG-ZEILE JE GRUND UND CACHE-PERIODE. Fehlschlaege werden nicht
+  // gecacht, jeder Aufruf der Uebersicht fragt den Anbieter also neu - ohne
+  // Drossel schriebe ein ausgefallener Anbieter eine Zeile pro Seitenaufruf und
+  // Mitglied. Der Schluessel ist der Grund selbst (Anbieter + Status/Fehlercode),
+  // kein Ort: Koordinaten gehoeren nicht ins Log.
+  const lastLogged = new Map();
+  function logOnce(key, msg) {
+    const now = Date.now();
+    const prev = lastLogged.get(key);
+    if (prev !== undefined && now - prev < CACHE_TTL_MS) return;
+    if (lastLogged.size >= CACHE_MAX_ENTRIES) lastLogged.clear();
+    lastLogged.set(key, now);
+    logger.warn(msg);
+  }
+
+  // Die Quelle ergibt `none`, obwohl ein Anbieter gewaehlt ist: die Einrichtung
+  // ist unvollstaendig. Fuer den Client ist das "nicht eingerichtet", fuer den
+  // Betreiber aber ein Befund - sonst sucht er, warum das Wetter fehlt.
+  function logIncompleteSetup(provider, lat, lon) {
+    if (provider === 'openweathermap' && !process.env.OPENWEATHER_API_KEY) {
+      logOnce('owm:no-key', 'OpenWeatherMap selected, but OPENWEATHER_API_KEY is not set - no weather');
+    } else if (provider === 'open-meteo' && !(lat && lon)) {
+      logOnce('om:no-coords', 'Open-Meteo selected, but no coordinates are stored - no weather');
+    }
+  }
+
   async function doFetch(url, opts) {
     // Node 22+ ships a global fetch — no node-fetch import needed.
     if (fetchFn) return fetchFn(url, opts);
@@ -86,11 +196,14 @@ export function buildRouter({ cfgGet: cfgGetFn = cfgGet, fetchFn = null } = {}) 
 
   // ---------------------------------------------------------------
   // GET /api/v1/weather
-  // Response: { data: { provider, city, units, current, today, forecast } } | { data: null }
+  // Response: { data: { provider, city, units, current, today, forecast } }
+  //         | { data: null, reason: 'not_configured' | 'upstream_error' }
   // `today` traegt den Kalendertag AM WETTERORT samt Hoch/Tief; `forecast` sind
   // die Folgetage. Die Anzeige benennt ihre Tage an `today.date`, nicht am Index.
   // ---------------------------------------------------------------
   router.get('/', async (req, res) => {
+    // Ausserhalb des try, damit der catch unten den Anbieter nennen kann.
+    let provider = null;
     try {
       // ── 1. Resolve provider ──────────────────────────────────
       // Die Vorrangregel (Datenbank vor `.env`) steht EINMAL in
@@ -104,12 +217,16 @@ export function buildRouter({ cfgGet: cfgGetFn = cfgGet, fetchFn = null } = {}) 
         city:     effective('weather_city', userId),
         units:    effective('weather_units', userId),
       });
-      if (resolved.source === 'none') return res.json({ data: null });
+      if (resolved.source === 'none') {
+        logIncompleteSetup(cfgGetFn('weather_provider'), effective('weather_lat', userId), effective('weather_lon', userId));
+        return res.json({ data: null, reason: WEATHER_REASON.NOT_CONFIGURED });
+      }
 
-      const { provider, lat, lon, city, units } = resolved;
+      const { lat, lon, city, units } = resolved;
+      provider = resolved.provider;
       const owmKey   = process.env.OPENWEATHER_API_KEY;
       const owmCity  = String(req.query.city || resolved.city);
-      const owmLang  = String(req.query.lang  || process.env.OPENWEATHER_LANG || 'en');
+      const owmLang  = owmLanguage(req.query.lang) ?? owmLanguage(process.env.OPENWEATHER_LANG) ?? 'en';
 
       // ── 2. Cache check ───────────────────────────────────────
       const cacheKey = provider === 'open-meteo'
@@ -153,8 +270,8 @@ export function buildRouter({ cfgGet: cfgGetFn = cfgGet, fetchFn = null } = {}) 
 
         const omRes = await doFetch(url, { signal: AbortSignal.timeout(8000) });
         if (!omRes.ok) {
-          log.warn(`Open-Meteo API error: ${omRes.status}`);
-          return res.json({ data: null });
+          logOnce(`open-meteo:http:${omRes.status}`, `Open-Meteo request failed: HTTP ${omRes.status}`);
+          return res.json({ data: null, reason: WEATHER_REASON.UPSTREAM_ERROR });
         }
         const om = await omRes.json();
         const cur = om.current;
@@ -196,8 +313,9 @@ export function buildRouter({ cfgGet: cfgGetFn = cfgGet, fetchFn = null } = {}) 
         const currentUrl = `https://api.openweathermap.org/data/2.5/weather?${cityParam(owmCity)}&appid=${owmKey}&units=${units}&lang=${owmLang}`;
         const currentRes = await doFetch(currentUrl, { signal: AbortSignal.timeout(8000) });
         if (!currentRes.ok) {
-          log.warn(`OWM API error: ${currentRes.status}`);
-          return res.json({ data: null });
+          // 401 heisst hier fast immer: der API-Key ist falsch oder abgelaufen.
+          logOnce(`openweathermap:http:${currentRes.status}`, `OpenWeatherMap request failed: HTTP ${currentRes.status}`);
+          return res.json({ data: null, reason: WEATHER_REASON.UPSTREAM_ERROR });
         }
         const currentJson = await currentRes.json();
 
@@ -313,8 +431,14 @@ export function buildRouter({ cfgGet: cfgGetFn = cfgGet, fetchFn = null } = {}) 
       });
       res.json({ data });
     } catch (err) {
-      log.warn('Error:', err.message);
-      res.json({ data: null }); // Fallback: Widget ausblenden, kein Error-Screen
+      // Zeitueberschreitung, DNS, unlesbare Antwort. Der Code (`ENOTFOUND`,
+      // `ECONNREFUSED`) steckt bei fetch in `cause`, der Name sagt Timeout.
+      // Die Meldung ohne URL: die des Legacy-Anbieters traegt den API-Key.
+      const code = err?.cause?.code || err?.code || err?.name || 'Error';
+      const detail = String(err?.message ?? err).replace(/https?:\/\/\S+/g, '<url>');
+      logOnce(`${provider ?? 'unknown'}:error:${code}`, `${provider ?? 'Weather'} request failed: ${code} (${detail})`);
+      // Kein Error-Screen: die Kachel sagt "gerade nicht verfuegbar".
+      res.json({ data: null, reason: WEATHER_REASON.UPSTREAM_ERROR });
     }
   });
 

@@ -741,8 +741,18 @@ test('PR2 #975 - das zusammengesetzte Kalenderformular und seine Seriennamen ble
       'nach dem Umschalten bestimmt das echte Ganztagsfeld die Vorschau');
 
     await page.click('#modal-save');
-    await page.waitForFunction((eventTitle) => [...document.querySelectorAll('.month-day__event span')]
-      .some((el) => el.textContent === eventTitle), {}, title);
+    // Die Serie beginnt am 15.09. mit BYMONTHDAY=-1: ihr erstes Vorkommen ist der
+    // 30.09., der 15.09. selbst ist keines. Jeder Monat ab dann traegt eines an
+    // seinem letzten Tag - dort muss die neue Serie stehen, ohne Neuladen. Bis
+    // hierhin stand nach dem Anlegen nur die Stammzeile auf ihrem Beginn im
+    // Raster: im September als Chip am 15.09. (kein Vorkommen, aber die alte
+    // Fassung dieser Sonde wartete genau darauf), ab Oktober gar nicht mehr.
+    await page.waitForFunction((eventTitle) => {
+      const inMonth = [...document.querySelectorAll('.month-day:not(.month-day--outside)')];
+      const lastDay = inMonth.at(-1);
+      return Boolean(lastDay) && [...lastDay.querySelectorAll('.month-day__event span')]
+        .some((el) => el.textContent === eventTitle);
+    }, {}, title);
     const monthA11y = await page.evaluate((eventTitle) => {
       const chip = [...document.querySelectorAll('.month-day__event')]
         .find((el) => el.querySelector('span:last-child')?.textContent === eventTitle);
@@ -770,6 +780,70 @@ test('PR2 #975 - das zusammengesetzte Kalenderformular und seine Seriennamen ble
     await page.close();
   }
 });
+
+/* Eine neue Serie laedt nach dem Anlegen den sichtbaren Bereich neu, statt die
+ * Stammzeile anzuhaengen (siehe die Sonde darueber). Dieses Neuladen darf sie
+ * nicht verlieren: scheitert das GET nach dem POST, oder kommt es aus dem
+ * Offline-Cache des Service Workers (`x-cached-at`, ein Stand von VOR dem
+ * Anlegen), steht die Serie danach trotzdem im Zustand - als Stammzeile an
+ * ihrem Beginn, wie vor dem Neuladen. Sonst schloss der Dialog mit "Termin
+ * erstellt", und der Termin fehlte bis zur naechsten Navigation ganz. */
+for (const [name, answer] of [
+  ['GET scheitert', (req) => req.abort('failed')],
+  ['GET kommt aus dem Cache', (req) => req.respond({
+    status: 200,
+    contentType: 'application/json',
+    headers: { 'x-cached-at': String(Date.now() - 60_000) },
+    body: JSON.stringify({ data: [] }),
+  })],
+]) {
+  test(`neue Serie bleibt sichtbar, wenn das Neuladen danach nichts Frisches liefert (${name})`, async () => {
+    const page = await openPage(harness, { device: 'desktop', locale: 'de' });
+    const title = `Serie ohne Neuladen ${randomUUID().slice(0, 8)}`;
+    try {
+      await gotoRoute(page, '/calendar');
+      await page.click('#cal-view-tab-day');
+      await page.waitForSelector('#cal-view-tab-day[aria-selected="true"]');
+      await page.click('#fab-new-event');
+      await page.waitForSelector('#modal-title');
+      await page.evaluate((eventTitle) => {
+        const change = (el) => el.dispatchEvent(new Event('change', { bubbles: true }));
+        document.querySelector('#modal-title').value = eventTitle;
+        for (const [selector, value] of [['#modal-start-time', '10:00'], ['#modal-end-time', '11:00']]) {
+          const el = document.querySelector(selector);
+          el.value = value;
+          change(el);
+        }
+        const freq = document.querySelector('#event-rrule-freq');
+        freq.value = 'WEEKLY';
+        change(freq);
+      }, title);
+
+      let posted = false;
+      let answered = 0;
+      page.__yuvomiRequestInterceptor = (req) => {
+        const url = new URL(req.url());
+        if (url.pathname !== '/api/v1/calendar') return false;
+        if (req.method() === 'POST') { posted = true; return false; }
+        if (req.method() !== 'GET' || !posted || answered > 0) return false;
+        answered += 1;
+        answer(req);
+        return true;
+      };
+      const created = page.waitForResponse((res) => res.request().method() === 'POST'
+        && new URL(res.url()).pathname === '/api/v1/calendar');
+      await page.click('#modal-save');
+      const id = (await (await created).json()).data.id;
+      await page.waitForFunction(() => !document.querySelector('#modal-title'));
+      assert.equal(answered, 1, 'das Neuladen nach dem Anlegen muss die praeparierte Antwort bekommen haben');
+      const shown = await page.evaluate((eventId) => document.querySelectorAll(`[data-id="${eventId}"]`).length, id);
+      assert.ok(shown > 0, `die neue Serie ${id} fehlt in der Tagesansicht ihres Beginns`);
+    } finally {
+      page.__yuvomiRequestInterceptor = null;
+      await page.close();
+    }
+  });
+}
 
 /* ────────────────────────────────────────────────────────────────────────────
  * Sonde 1: Kopf-Ueberlauf
@@ -1774,12 +1848,35 @@ describe('Sonde 5 - eine Wischzeile antwortet, und jede Rolle liegt an ihrer Kan
         if (!hasRows) return;
         listsSeen += 1;
 
+        // WELCHE KANTEN DIE ZEILE TRAEGT, STEHT IM DOKUMENT (R16). Bis dahin
+        // setzte die Sonde voraus, dass jede Wischzeile BEIDE Kanten belegt, und
+        // meldete die Vorratszeile - nur Loeschen am Zeilenende, am Anfang gibt
+        // es dort nichts Positives zu erledigen - als "nicht verdrahtet". Das
+        // war die falsche Diagnose fuer eine richtig verdrahtete Zeile. Gemessen
+        // wird jetzt je Kante, was die Zeile dort zusagt: ein Panel antwortet,
+        // eine Kante ohne Panel deckt nichts auf. Eine Zeile ganz ohne Panel
+        // bleibt ein Befund - sonst waere "keine Geste" wieder gruen.
+        const sides = await page.evaluate(() => {
+          const row = document.querySelector('.swipe-row');
+          return ['leading', 'trailing'].filter((side) => row?.querySelector(`.swipe-reveal--${side}`));
+        });
+        if (!sides.length) {
+          findings.push(`${name}: die erste Wischzeile traegt an keiner Kante ein Panel.`);
+          return;
+        }
+
         // In RTL deckt derselbe Finger die andere Kante auf - die Erwartung
         // spiegelt mit, die Kante bleibt dieselbe.
         for (const [sign, side] of [[1, rtl ? 'trailing' : 'leading'], [-1, rtl ? 'leading' : 'trailing']]) {
           const classes = await uncoveredPanel(page, sign);
           const move = sign > 0 ? 'nach rechts' : 'nach links';
 
+          if (!sides.includes(side)) {
+            if (classes?.length) {
+              findings.push(`${name}: der Wisch ${move} deckt ${classes.join('.')} auf, obwohl die Zeile an der ${side}-Kante kein Panel traegt.`);
+            }
+            continue;
+          }
           if (!classes?.length) {
             findings.push(`${name}: der Wisch ${move} deckt nichts auf - die Zeilen sind nicht verdrahtet.`);
             continue;
@@ -1902,6 +1999,34 @@ async function metricRowHeights(page) {
   });
 }
 
+/**
+ * Klappt jede eingeklappte Kennzahlreihe der Ansicht auf und meldet, wie viele.
+ *
+ * SEIT R16 STEHEN DIE KENNZAHLEN MOBIL HINTER EINER KURZZEILE (metric-glance.js):
+ * ein Knopf mit `aria-expanded="false"` und `aria-controls` auf die Reihe, die
+ * solange `display: none` traegt. Die Sonde sah von dort an mobil vier Reihen
+ * statt sieben und haette die uebrigen nie wieder gemessen - eine Reihe, die
+ * erst nach einem Tipp im Bild steht, ist trotzdem eine Reihe. Gelesen wird die
+ * BEZIEHUNG im Dokument (ein Aufklapper, dessen Bereich Kennzahlkarten traegt),
+ * kein Klassenname: ein neuer Traeger der Kurzzeile ist damit schon gemessen.
+ */
+async function openMetricDisclosures(page) {
+  const opened = await page.evaluate(() => {
+    let n = 0;
+    for (const btn of document.querySelectorAll('[aria-expanded="false"][aria-controls]')) {
+      if (!btn.getClientRects().length) continue;
+      const region = document.getElementById(btn.getAttribute('aria-controls'));
+      if (!region || !region.querySelector('.metric-card')) continue;
+      btn.click();
+      n += 1;
+    }
+    return n;
+  });
+  // Das Aufklappen laeuft als Hoehen-Uebergang; gemessen wird der Endzustand.
+  if (opened) await new Promise((resolve) => { setTimeout(resolve, 700); });
+  return opened;
+}
+
 describe('Sonde 6 - die Kacheln einer Kennzahlreihe sind gleich hoch', () => {
   for (const device of ['mobile', 'desktop']) {
     test(`Geraet ${device}`, async () => {
@@ -1924,7 +2049,10 @@ describe('Sonde 6 - die Kacheln einer Kennzahlreihe sind gleich hoch', () => {
       // Ohne sie saehe die Sonde von sieben Kennzahlreihen genau eine.
       for (const name of sweep('Sonde 6')) {
         await gotoRoute(page, ALL_ROUTES[name]);
-        await visitViews(page, name, async (where) => check(where, await metricRowHeights(page)));
+        await visitViews(page, name, async (where) => {
+          await openMetricDisclosures(page);
+          check(where, await metricRowHeights(page));
+        });
       }
       await page.close();
 
@@ -2346,12 +2474,12 @@ test('Sonde 8 - ein Kopf mit Lead-Zone traegt seine Linie erst angedockt, und do
  *
  * DIE SIGNATUR IST DER MASSSTAB, NICHT EINE OBERGRENZE. Die Frage ist nicht
  * „wie viele Ebenen sind zu viele", sondern „waechst die Zahl mit dem Inhalt".
- * Ein einmaliges Chrome-Element (die Sidebar-Pille, der Tab-Indikator, ein
- * Backdrop-Blob) darf sein Versprechen dauerhaft halten - es gibt genau eins
+ * Ein einmaliges Chrome-Element (die Sidebar-Pille, der Tab-Indikator)
+ * darf sein Versprechen dauerhaft halten - es gibt genau eins
  * davon, egal wie lang die Liste wird. Eine Zeile darf es nicht: dieselbe
  * Signatur zweimal heisst, sie kommt auch 200-mal.
  *
- * Genau diese Unterscheidung sieht ein Stylesheet-Scanner nicht: `.lg-blob--1`
+ * Genau diese Unterscheidung sieht ein Stylesheet-Scanner nicht: `.nav-sidebar__indicator`
  * und `.task-card` tragen dieselbe Deklaration.
  */
 // Nur Versprechen, die tatsaechlich eine eigene Ebene erzwingen. `will-change:
@@ -2407,7 +2535,9 @@ test('Sonde 9 - ein Compositor-Versprechen im Ruhezustand ist einmalig, nie eine
   // Eine Sonde, die nichts gesehen hat, darf nicht urteilen (dieselbe
   // Zusicherung wie bei Sonde 3 bis 8). Hier zaehlt BEIDES: die Routen, und
   // dass ueberhaupt Ebenen gefunden werden - die Shell traegt drei einmalige
-  // (Sidebar-Pille, Sidebar-Hover, Tab-Indikator) plus die Backdrop-Blobs.
+  // (Sidebar-Pille, Sidebar-Hover, Tab-Indikator).  Die vier Backdrop-Blobs,
+  // die bis R18 dazukamen, sind gestrichen - die Schwelle unten (eine Ebene je
+  // Route) haelt auch ohne sie.
   // Findet die Sonde gar keine, misst sie den Selektor falsch statt die App.
   assert.ok(routesSeen >= routes.length - 1,
     `Nur ${routesSeen} von ${routes.length} Zustaenden gesehen.`);
@@ -2462,8 +2592,8 @@ test('Sonde 9 - ein Compositor-Versprechen im Ruhezustand ist einmalig, nie eine
  * im synchronen Markup, war aber im Sinne der Sichtbarkeitspruefung nicht da.
  * Ein Guard, der von einer Animation abhaengt, meldet Zufall statt Regel.
  *
- * NUR ENDLICHE Animationen: die Backdrop-Blobs laufen mit
- * `animation: lg-drift 26s infinite alternate` und werden NIE fertig - ein
+ * NUR ENDLICHE Animationen: eine Endlos-Schleife (Spinner, Skelett-Schimmer,
+ * Wetter; bis R18 auch die Backdrop-Blobs) wird NIE fertig - ein
  * naives `Promise.all(getAnimations().map(a => a.finished))` haengt bis zum
  * Timeout der Suite.
  */
@@ -3585,7 +3715,9 @@ describe('Sonde 15 - in der kompakten Hoehe traegt der Kopf hoechstens eine Bedi
  * Leerlauf fielen dadurch 60 auf ~20 fps, bei einem Style-Recalc je Frame; ein
  * Melder sah 100 % GPU auf integrierter Grafik. Die Reparatur trennt beides auf
  * zwei Knoten - die Huelle bewegt sich, das Kind `.lg-blob__ink` traegt den
- * Blur und steht still -, danach standen 60 fps.
+ * Blur und steht still -, danach standen 60 fps. Der Backdrop ist seit R18
+ * (2026-10-07) gestrichen, weil er vollstaendig unter dem opaken Scrollport
+ * lag; die Regel gilt weiter fuer alles, was im Leerlauf laeuft.
  *
  * WARUM NICHT IM STYLESHEET. Die Zuordnung ist dort nicht sichtbar: Filter und
  * Animation koennen in zwei getrennten Regeln stehen (`.lg-blob` und
@@ -3607,12 +3739,28 @@ describe('Sonde 16 - kein dauerlaufendes Element rastert pro Frame einen Filter'
     const offenders = [];
     // Zustaende, in denen die Vorbedingung fehlte - JE ZUSTAND, nicht als Summe.
     const unmeasured = [];
+    const backdropBack = [];
 
     for (const name of sweep('Sonde 16')) {
       await gotoRoute(page, ALL_ROUTES[name]);
       const found = await page.evaluate(() => {
-        const out = { animated: 0, blobs: 0, blobsRunning: 0, offenders: [] };
-        out.blobs = document.querySelectorAll('.lg-blob').length;
+        const out = { animated: 0, shell: false, backdrop: 0, selfTest: false, offenders: [] };
+        // SELBSTPROBE: ein Koeder, der die Regel verletzt (endlos + filter).
+        // Bis R18 bewiesen die vier Backdrop-Blobs in jedem Zustand, dass die
+        // Sonde Endlos-Animationen ueberhaupt liest; seit es sie nicht mehr
+        // gibt, steht in einer ruhenden Seite oft keine einzige. Findet die
+        // Sonde den Koeder nicht, ist sie blind, nicht die Seite sauber.
+        const bait = document.createElement('div');
+        bait.setAttribute('data-probe16-bait', '');
+        bait.style.cssText = 'position:fixed;inline-size:1px;block-size:1px;opacity:0;pointer-events:none;'
+          + 'animation:probe16-bait 1s linear infinite;filter:blur(1px)';
+        document.body.appendChild(bait);
+        // Die Vorbedingung je Zustand: die Shell steht und die Seite ist
+        // aufgebaut. Bis R18 war es der laufende Backdrop - den gibt es nicht
+        // mehr, und kaeme er zurueck, ist das hier der Befund.
+        out.shell = !!document.querySelector('.app-shell')
+          && (document.getElementById('main-content')?.childElementCount ?? 0) > 0;
+        out.backdrop = document.querySelectorAll('.lg-blob, .lg-backdrop').length;
         for (const el of document.querySelectorAll('*')) {
           const cs = getComputedStyle(el);
           // `infinite` liest sich berechnet als 'infinite'; mehrere Animationen
@@ -3625,18 +3773,21 @@ describe('Sonde 16 - kein dauerlaufendes Element rastert pro Frame einen Filter'
             && cs.animationDuration.split(',').some((v) => parseFloat(v) > 0);
           if (!endless || !running) continue;
           out.animated += 1;
-          if (el.classList.contains('lg-blob')) out.blobsRunning += 1;
           const filter = cs.filter;
+          if (el === bait) { out.selfTest = !!filter && filter !== 'none'; continue; }
           if (filter && filter !== 'none') {
             out.offenders.push(`${el.tagName.toLowerCase()}.${el.className || '(ohne Klasse)'} -> ${filter}`);
           }
         }
+        bait.remove();
+        out.animated -= 1;
         return out;
       });
-      if (found.blobs === 0 || found.blobsRunning < found.blobs) {
-        unmeasured.push(`${name}: ${found.blobs} .lg-blob, davon ${found.blobsRunning} endlos animiert `
-          + `(${found.animated} dauerlaufende Animationen insgesamt)`);
+      if (!found.selfTest) unmeasured.push(`${name}: der Koeder (endlos + filter) wurde nicht erkannt`);
+      if (!found.shell) {
+        unmeasured.push(`${name}: keine aufgebaute Shell (${found.animated} dauerlaufende Animationen)`);
       }
+      if (found.backdrop > 0) backdropBack.push(`${name}: ${found.backdrop} Backdrop-Knoten`);
       for (const o of found.offenders) offenders.push(`${name}: ${o}`);
     }
     await page.close();
@@ -3650,19 +3801,23 @@ describe('Sonde 16 - kein dauerlaufendes Element rastert pro Frame einen Filter'
     // konnte nicht sagen, welche Zustaende zu kurz kamen; und ein Lauf, in dem
     // einigen die Shell fehlte, waehrend andere Spinner oder Skelette trugen,
     // blieb gruen, obwohl jene Zustaende nie geprueft waren. Die Vorbedingung
-    // ist der lebende Backdrop, und der steht in JEDEM Zustand: mindestens ein
-    // `.lg-blob`, und jeder davon laeuft endlos. Fehlt er, nennt die Meldung
-    // den Zustand - die Zahl der Blobs kommt aus dem Dokument, nicht von hier.
+    // war bis R18 der lebende Backdrop (in JEDEM Zustand vier endlos laufende
+    // `.lg-blob`). Er ist gestrichen; seither ist die Vorbedingung je Zustand
+    // die aufgebaute Shell und der erkannte Koeder (siehe oben): eine ruhende
+    // Seite traegt oft keine einzige Endlos-Animation, also beweist die Sonde
+    // an einem eingebauten Verstoss, dass sie ihn saehe.
     assert.deepEqual(unmeasured, [],
-      'Zustaende ohne laufenden Backdrop - dort hat die Sonde nichts gemessen, statt nichts '
-      + 'zu finden. Fehlt die Shell (Route nicht aufgebaut, auf /login gelandet), oder laufen '
-      + `die .lg-blob nicht mehr?\n  ${unmeasured.join('\n  ')}`);
+      'Zustaende ohne aufgebaute Shell oder ohne erkannten Koeder - dort hat die Sonde nichts gemessen, statt nichts '
+      + `zu finden (Route nicht aufgebaut, auf /login gelandet?).\n  ${unmeasured.join('\n  ')}`);
+    assert.deepEqual(backdropBack, [],
+      'Der Backdrop ist zurueck. Er lag vollstaendig unter dem opaken Scrollport und ist '
+      + `mit R18 gestrichen (DESIGN.md, "Colors").\n  ${backdropBack.join('\n  ')}`);
 
     assert.deepEqual(offenders.sort(), [],
       'Ein endlos animiertes Element traegt einen `filter` und rastert ihn damit pro '
       + 'Frame neu - im Leerlauf, solange die Seite offen ist (Issue #716). Bewegung '
       + 'und Filter gehoeren auf zwei Knoten: die aeussere Huelle bewegt sich, das '
-      + `Kind traegt den Filter und steht still (siehe .lg-blob in glass.css).\n  ${offenders.join('\n  ')}`);
+      + `Kind traegt den Filter und steht still.\n  ${offenders.join('\n  ')}`);
   });
 });
 
@@ -4578,7 +4733,9 @@ async function openExistingNoteEditor(page, noteId) {
   await page.click(`.note-card[data-id="${noteId}"] .note-card__open`);
   await page.waitForSelector('#note-content');
   await new Promise((resolve) => setTimeout(resolve, 300));
-  await page.click('.note-mode-switch [data-view="edit"]');
+  // Seit R18 (2026-10-07) fuehrt aus der Leseansicht EIN Weg in den Editor:
+  // der Primaerknopf im Fuss. Der Umschalter steht erst im Editor.
+  await page.click('#note-modal-edit');
   await page.waitForSelector('#note-pane-edit:not([hidden])');
 }
 
@@ -4755,7 +4912,7 @@ test('Sonde 21 - Notiz-Kategorien behalten Fokus, Gruppenrolle und Reader-Icons'
     await page.waitForSelector('.note-modal[data-view="read"]');
     const readTurns = [];
     for (let turn = 0; turn < 2; turn += 1) {
-      await page.click('.note-mode-switch [data-view="edit"]');
+      await page.click('#note-modal-edit');
       await page.click('.note-mode-switch [data-view="read"]');
       readTurns.push(await page.evaluate(() => ({
         icons: document.querySelectorAll('.note-read__categories svg').length,
@@ -4783,7 +4940,7 @@ test('Sonde 21 - Notiz-Kategorien behalten Fokus, Gruppenrolle und Reader-Icons'
 
     // Escape belongs to the open combobox first, then to the containing modal.
     // With a dirty search field the second press must reach the discard guard.
-    await page.click('.note-mode-switch [data-view="edit"]');
+    await page.click('#note-modal-edit');
     await new Promise((resolve) => setTimeout(resolve, 100));
     await page.focus('#note-category-search');
     await page.type('#note-category-search', third.name);
@@ -5303,9 +5460,17 @@ test('Sonde 24 - spaeter Umbenennungskonflikt ersetzt keinen neuen Notizeditor',
     }, { firstName: renamedCategory, secondName: conflictingCategory });
     await gotoRoute(page, '/notes');
 
-    // Seit der Kopfregel mobil (2026-09-26) ein Eintrag im Werkzeugmenue.
-    await page.click('.notes-toolbar .page-tools-btn');
-    await page.click('#notes-tools-menu [data-action="manage-categories"]');
+    // Seit der Kopfregel mobil (2026-09-26) ein Werkzeug des Kopfs - und seit
+    // R16 ein direkter Knopf, solange es das einzige ist (`pageToolsMenuHtml`:
+    // ein Eintrag ist ein Knopf, kein Menue). Die Sonde nimmt die Bauart, die
+    // im Dokument steht; kommt ein zweiter Eintrag dazu, geht sie durchs Menue.
+    const directTool = await page.$('.notes-toolbar .page-tools-btn--direct[data-action="manage-categories"]');
+    if (directTool) {
+      await directTool.click();
+    } else {
+      await page.click('.notes-toolbar .page-tools-btn');
+      await page.click('#notes-tools-menu [data-action="manage-categories"]');
+    }
     await page.waitForSelector(`yuvomi-category-manager .cat-row[data-key="${categoryIds[0]}"]`);
     await page.click(`yuvomi-category-manager .cat-row[data-key="${categoryIds[0]}"] .cat-row__name`);
     await page.waitForSelector('#prompt-modal-input');

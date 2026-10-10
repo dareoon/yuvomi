@@ -33,6 +33,7 @@
 import { esc } from '/utils/html.js';
 import { emptyStateEl, mountLoadError } from '/utils/empty-state.js';
 import { t } from '/i18n.js';
+import { swapContent } from '/utils/content-swap.js';
 
 /** Die eine lebende Instanz. Es gibt je Seite hoechstens eine Liste + Detail. */
 let active = null;
@@ -320,7 +321,16 @@ export function mountMasterDetail({
     emptyEl.hidden = false;
   }
 
-  async function paint(id) {
+  /**
+   * @param {string} id
+   * @param {{swap?: boolean}} [opts] `swap`: die AUSWAHL hat gewechselt - der
+   *   neue Inhalt blendet ein (utils/content-swap.js, ohne Richtung: nur
+   *   `opacity`, ein Versatz machte die Spalte fuer die Dauer zum Bezugsrahmen
+   *   ihres klebenden Kopfes). Ein Neuzeichnen DERSELBEN Auswahl (nach dem
+   *   Speichern, `refresh({ repaint })`) blendet nicht: dort wechselt ein
+   *   Wert, nicht der Gegenstand.
+   */
+  async function paint(id, { swap = false } = {}) {
     const seq = ++renderSeq;
     renderAbort?.abort();
     renderAbort = new AbortController();
@@ -355,6 +365,9 @@ export function mountMasterDetail({
       return;
     }
     if (window.lucide) window.lucide.createIcons({ el: bodyEl });
+    // Erst hier: der Inhalt steht fertig da (der Tausch war renderDetail), die
+    // Blende haengt an nichts - laeuft sie nicht, ist die Spalte trotzdem da.
+    if (swap) swapContent(bodyEl, null);
   }
 
   /**
@@ -386,17 +399,27 @@ export function mountMasterDetail({
     autoPick = false;
     markSelection();
     writeHistory(same ? 'none' : mode, hrefFor, selected);
-    if (!same || bodyEl.hidden) paint(selected);
+    if (!same || bodyEl.hidden) paint(selected, { swap: !same });
     if (focus === 'row') focusTarget(rowFor(selected))?.focus();
     else if (focus === 'detail') detailEl.focus();
   }
 
-  function clear({ history: mode = 'replace' } = {}) {
+  /**
+   * Hebt die Auswahl auf.
+   * @param {{history?: 'push'|'replace'|'none', repick?: boolean}} [opts]
+   *   `repick`: die Liste wechselt gleich ihren Zusammenhang (Aufgaben: Liste
+   *   und Verlauf in derselben Spalte). Die Vorwahl wird wieder scharf - wie
+   *   wenn eine gezeigte Zeile wegfaellt (refresh) -, und der naechste
+   *   refresh() mit Zeilen waehlt die erste, wie Mail beim Ordnerwechsel.
+   *   Ohne `repick` bleibt es beim Leerzustand (Esc: der Nutzer hat abgewaehlt).
+   */
+  function clear({ history: mode = 'replace', repick = false } = {}) {
     selected = null;
     renderSeq += 1;
     markSelection();
     showEmpty();
     writeHistory(mode, hrefFor, null);
+    if (repick) autoPick = preselect !== false;
   }
 
   /** Ein laufendes Oeffnen unter der Schwelle ist ueberholt. */
