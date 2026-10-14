@@ -19,7 +19,7 @@
  *   → bypassCacheUntil (in-memory + Cache API für SW-Restart-Robustheit)
  */
 
-const APP_RELEASE        = '2.75.0';
+const APP_RELEASE        = '2.77.1';
 const APP_BUILD_REVISION = '__YUVOMI_BUILD_REVISION__';
 const CACHE_RELEASE      = `${APP_RELEASE}-${APP_BUILD_REVISION}`;
 const SHELL_CACHE        = `yuvomi-shell-${CACHE_RELEASE}`;
@@ -137,6 +137,7 @@ const APP_SHELL = [
   '/utils/document-folder-delete.js',
   '/utils/document-preview.js',
   '/utils/event-color.js',
+  '/utils/event-icon.js',
   '/utils/empty-state.js',
   '/utils/extension-i18n.js',
   '/utils/extension-widgets.js',
@@ -375,6 +376,7 @@ const PAGE_MODULES = [
   '/settings/region-presets.js',
   '/settings/weather-location.js',
   '/settings/family-users.js',
+  '/settings/module-install-errors.js',
   '/settings/pages/personal-account.js',
   '/settings/pages/personal-schedule.js',
   '/settings/pages/admin-email.js',
@@ -388,6 +390,7 @@ const PAGE_MODULES = [
   '/settings/pages/personal-calendar.js',
   '/settings/pages/personal-tasks.js',
   '/settings/pages/modules-active.js',
+  '/settings/pages/modules-install.js',
   '/settings/pages/modules-navigation.js',
   '/settings/pages/modules-kitchen.js',
   '/settings/pages/modules-calendar.js',

@@ -142,6 +142,62 @@ function makeBtn({ textContent = 'Speichern' } = {}) {
 // wireBlurValidation
 // --------------------------------------------------------
 
+function confirmationPanel() {
+  const listeners = new Map();
+  const ok = { disabled: false, addEventListener: (_, fn) => listeners.set('ok', fn) };
+  const cancel = { disabled: false, addEventListener: (_, fn) => listeners.set('cancel', fn) };
+  const error = { hidden: true, textContent: '' };
+  const attributes = new Map();
+  return {
+    ok, cancel, error, listeners, attributes,
+    querySelector: (selector) => ({ '#confirm-modal-ok': ok, '#confirm-modal-cancel': cancel, '#confirm-modal-error': error })[selector],
+    setAttribute: (key, value) => attributes.set(key, value),
+    removeAttribute: (key) => attributes.delete(key),
+  };
+}
+
+test('confirmation waits for its action and ignores duplicate clicks while busy', async () => {
+  const panel = confirmationPanel();
+  const finished = [];
+  let complete;
+  let calls = 0;
+  modalTest.wireConfirmation(panel, value => finished.push(value), () => {
+    calls++;
+    return new Promise(resolve => { complete = resolve; });
+  });
+  const pending = panel.listeners.get('ok')();
+  assert.equal(panel.ok.disabled, true);
+  assert.equal(panel.cancel.disabled, true);
+  assert.equal(panel.attributes.get('aria-busy'), 'true');
+  await panel.listeners.get('ok')();
+  panel.listeners.get('cancel')();
+  assert.equal(calls, 1);
+  assert.deepEqual(finished, []);
+  complete();
+  await pending;
+  assert.deepEqual(finished, [true]);
+  assert.equal(panel.attributes.has('aria-busy'), false);
+});
+
+test('failed confirmation actions keep the dialog open and allow retry', async () => {
+  const panel = confirmationPanel();
+  const finished = [];
+  let fail = true;
+  modalTest.wireConfirmation(panel, value => finished.push(value), async () => {
+    if (fail) throw new Error('Could not disable export');
+  });
+  await panel.listeners.get('ok')();
+  assert.deepEqual(finished, []);
+  assert.equal(panel.error.hidden, false);
+  assert.equal(panel.error.textContent, 'Could not disable export');
+  assert.equal(panel.ok.disabled, false);
+  assert.equal(panel.cancel.disabled, false);
+  fail = false;
+  await panel.listeners.get('ok')();
+  assert.equal(panel.error.hidden, true);
+  assert.deepEqual(finished, [true]);
+});
+
 test('confirmOverModal finalisiert das geparkte Modal gemäß closeOnConfirm', async () => {
   const suspended = { id: 'editor' };
   const resumed = [];
@@ -2043,4 +2099,58 @@ test('#1784: isFormDirty() urteilt ohne Tausch exakt wie der Textvergleich davor
       releaseOverlayForTest();
     }
   }
+});
+
+// --------------------------------------------------------
+// Die gehobene Fusszeile bindet ihre Knoepfe an das richtige Formular (#1976)
+// --------------------------------------------------------
+
+/**
+ * Baut ein Panel mit Rumpf > Formular > Fusszeile, wie `openModal()` es vor
+ * `mountFooter()` vorfindet. Die Attrappe aus `fussAttrappe()` kennt keinen
+ * Nachfahren-Selektor, darum beantwortet das Panel die beiden Abfragen von
+ * `mountFooter()`/`collapseEmptyBody()` selbst.
+ */
+function panelMitFormular({ formAttrs = {}, fields = [] } = {}) {
+  const { el, withText } = fussAttrappe();
+  const cancel = withText(el('button', { cls: ['btn', 'btn--secondary'], attrs: { type: 'button' } }), 'Abbrechen');
+  const save = withText(el('button', { cls: ['btn', 'btn--primary'], attrs: { type: 'submit' } }), 'Hinzufuegen');
+  const footer = el('div', { cls: ['modal-panel__footer'], kids: [cancel, save] });
+  footer.removeAttribute = (n) => { delete footer.attrs[n]; };
+  const form = el('form', { attrs: formAttrs, kids: [...fields, footer] });
+  const body = el('div', { cls: ['modal-panel__body'], kids: [form] });
+  body.children = body.childNodes;
+  const panel = el('div', { cls: ['modal-panel'], kids: [body] });
+  panel.children = panel.childNodes;
+  panel.querySelectorAll = (s) => (s === '.modal-panel__body .modal-panel__footer' ? [footer] : []);
+  panel.querySelector = (s) => (s === '.modal-panel__body' ? body : null);
+  return { el, panel, form, footer, buttons: [cancel, save] };
+}
+
+test('#1976: ein Feld name="id" ueberdeckt form.id - die Knoepfe zeigen trotzdem auf das Formular', async () => {
+  const { mountFooter } = await import('../public/components/modal.js');
+  const { el } = fussAttrappe();
+  const hidden = el('input', { attrs: { type: 'hidden', name: 'id', value: '' } });
+  const { panel, form, footer, buttons } = panelMitFormular({
+    formAttrs: { id: 'housekeeping-worker-form' }, fields: [hidden],
+  });
+  // So liefert der Browser es: benannte Felder ueberdecken gleichnamige
+  // Eigenschaften eines <form> (gemessen im Haushaltshilfe-Dialog).
+  Object.defineProperty(form, 'id', { get: () => hidden, set: () => {}, configurable: true });
+
+  assert.equal(mountFooter(panel), footer);
+  for (const b of buttons) {
+    assert.equal(b.getAttribute('form'), 'housekeeping-worker-form',
+      'der Knopf muss das Formular per id finden, nicht "[object HTMLInputElement]"');
+  }
+  assert.equal(form.getAttribute('id'), 'housekeeping-worker-form', 'die id des Formulars bleibt');
+});
+
+test('#1976: ein Formular ohne id bekommt eine, und die Knoepfe zeigen auf genau diese', async () => {
+  const { mountFooter } = await import('../public/components/modal.js');
+  const { panel, form, buttons } = panelMitFormular();
+  mountFooter(panel);
+  const id = form.getAttribute('id');
+  assert.match(id ?? '', /^modal-form-\d+$/);
+  for (const b of buttons) assert.equal(b.getAttribute('form'), id);
 });

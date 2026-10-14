@@ -1280,11 +1280,19 @@ export function mountFooter(panel) {
   // scheinbar nichts (#543). Vor dem Verschieben die Formular-Zugehörigkeit
   // per form-Attribut festzurren; so submittet der Button das Formular auch
   // außerhalb des Formular-DOM (Standard-HTML-Assoziation).
+  // Die id ueber das ATTRIBUT lesen, nie ueber `form.id`: ein Feld mit
+  // name="id" ueberdeckt die Eigenschaft am <form>, `form.id` ist dann das
+  // Feld, und der Knopf zeigte auf form="[object HTMLInputElement]" - kein
+  // Formular, kein submit, der Haushaltshilfe-Dialog speicherte nie (#1976).
   const ownerForm = bodyFooter.closest('form');
   if (ownerForm) {
-    if (!ownerForm.id) ownerForm.id = `modal-form-${++_modalFormSeq}`;
+    let formId = ownerForm.getAttribute('id');
+    if (!formId) {
+      formId = `modal-form-${++_modalFormSeq}`;
+      ownerForm.setAttribute('id', formId);
+    }
     bodyFooter.querySelectorAll('button, input, select, textarea').forEach((el) => {
-      if (!el.hasAttribute('form')) el.setAttribute('form', ownerForm.id);
+      if (!el.hasAttribute('form')) el.setAttribute('form', formId);
     });
   }
 
@@ -1952,6 +1960,38 @@ export function selectModal(label, options) {
 // confirmModal
 // --------------------------------------------------------
 
+// Optional onConfirm completes the action before the confirmation is dismissed.
+function wireConfirmation(panel, finish, onConfirm) {
+  const ok = panel.querySelector('#confirm-modal-ok');
+  const cancel = panel.querySelector('#confirm-modal-cancel');
+  const error = panel.querySelector('#confirm-modal-error');
+  let pending = false;
+  ok?.addEventListener('click', async () => {
+    if (pending) return;
+    if (!onConfirm) return finish(true);
+    pending = true;
+    ok.disabled = true;
+    if (cancel) cancel.disabled = true;
+    panel.setAttribute('aria-busy', 'true');
+    if (error) error.hidden = true;
+    try {
+      await onConfirm();
+      finish(true);
+    } catch (err) {
+      if (error) {
+        error.textContent = err?.data?.error ?? err?.message ?? t('common.errorGeneric');
+        error.hidden = false;
+      }
+    } finally {
+      pending = false;
+      ok.disabled = false;
+      if (cancel) cancel.disabled = false;
+      panel.removeAttribute('aria-busy');
+    }
+  });
+  cancel?.addEventListener('click', () => { if (!pending) finish(false); });
+}
+
 /**
  * Bestätigungsdialog. `message` ist die Frage (wird zum Titel), `detail` die
  * optionale Folgen-Erklärung darunter. Die Trennung erlaubt es, das Objekt der
@@ -1963,8 +2003,10 @@ export function selectModal(label, options) {
  * die Wege „Behalten" und „Löschen" - beide tun etwas, und „Abbrechen" auf dem
  * einen Knopf verschwiege, dass die Termine dann bleiben (#732). Ohne die
  * Angabe steht dort weiterhin „Abbrechen".
+ * Optionales `onConfirm` wird vor dem Schliessen abgewartet. Bei einem Fehler
+ * bleibt der Dialog fuer einen erneuten Versuch offen und zeigt die Meldung.
  */
-export function confirmModal(message, { confirmLabel, cancelLabel, danger = false, detail = null } = {}) {
+export function confirmModal(message, { confirmLabel, cancelLabel, danger = false, detail = null, onConfirm } = {}) {
   return new Promise((resolve) => {
     let resolved = false;
 
@@ -1981,6 +2023,7 @@ export function confirmModal(message, { confirmLabel, cancelLabel, danger = fals
       size: 'sm',
       content: `
         ${detail ? `<p class="modal-confirm__detail">${esc(detail)}</p>` : ''}
+        ${onConfirm ? '<p class="form-error" id="confirm-modal-error" role="alert" hidden></p>' : ''}
         <div class="modal-panel__footer">
           <button type="button" class="btn btn--secondary" id="confirm-modal-cancel">${cancelLabel ?? t('common.cancel')}</button>
           <button type="button" class="btn ${danger ? 'btn--danger' : 'btn--primary'}" id="confirm-modal-ok">
@@ -1989,8 +2032,7 @@ export function confirmModal(message, { confirmLabel, cancelLabel, danger = fals
         </div>`,
       onClose: () => finish(false),
       onSave(panel) {
-        panel.querySelector('#confirm-modal-ok')?.addEventListener('click', () => finish(true));
-        panel.querySelector('#confirm-modal-cancel')?.addEventListener('click', () => finish(false));
+        wireConfirmation(panel, finish, onConfirm);
       },
     });
   });
@@ -2124,6 +2166,7 @@ export const __test = {
   createConfirmOverModal,
   createAskOverModal,
   finishSuspendedConfirmation,
+  wireConfirmation,
   applyInitialFocus,
   trapFocus,
 };

@@ -65,6 +65,7 @@ import {
   forgetScrollPositions,
 } from '/utils/scroll-restore.js';
 import { openModal, confirmModal } from '/components/modal.js';
+import { armScreensaver, disarmScreensaver } from '/components/photo-screensaver.js';
 import { installPopoverMenus } from '/utils/popover-menu.js';
 import { prefersInkText } from '/utils/contrast.js';
 import { handleMasterDetailPopstate } from '/utils/master-detail.js';
@@ -660,6 +661,7 @@ const navigate = createNavigate(routerState, {
   location, history, window, document,
   hasLeaveGuard, mayLeave, whenHistorySettled, consumeOverlayMarker,
   auth: startHandoff.auth, syncPreferencesOnce, startThirdPartyModulePolling, loadReminderStyles, initReminders, initPush,
+  armScreensaver,
   rememberScrollPosition, scrollPositionFor, renderPage, adoptPageFab, updateNav, topLevelSection,
   syncWallMode, applyModuleAccentForRoute, updateThemeColorForRoute, updateBranding,
   focusMainContentAfterNavigation, showToast, t,
@@ -2529,6 +2531,11 @@ let _openSearch = null;
 
 function initKeyboardShortcuts() {
   document.addEventListener('keydown', (e) => {
+    // Passwort-Autofill (Edge/Chrome) schickt ein keydown ohne `key` - etwa
+    // auf Einstellungen > Kalender mit seinen zwei Passwortfeldern. Ohne
+    // Taste gibt es kein Kuerzel; `e.key.toLowerCase()` warf sonst einen
+    // TypeError, der als „Unerwarteter Fehler" aufschlug.
+    if (typeof e.key !== 'string') return;
     // ⌘K / Ctrl+K: das Kuerzel, das die Suche in der Seitenleiste nennt. Es
     // gilt auch aus einem Eingabefeld heraus (so kennt man es aus jeder App
     // mit Befehlssuche), aber nicht ueber einem offenen Dialog, und nie mit
@@ -4528,6 +4535,11 @@ function forgetSessionState() {
   stopThirdPartyModulePolling();
   stopReminders();
   stopPush();
+  // Und der Foto-Bildschirmschoner (#1919): ohne Sitzung fragt er nichts mehr
+  // an - sein 401 zeichnete sonst die Anmeldeseite ueber ein halb
+  // ausgefuelltes Formular. Scharf macht ihn navigate(), sobald es wieder
+  // jemanden gibt.
+  disarmScreensaver();
 }
 
 // Session abgelaufen

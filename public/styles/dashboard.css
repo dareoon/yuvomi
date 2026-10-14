@@ -1249,6 +1249,8 @@
   /* Kategorienamen trennen statt brechen (W1, test:typography). */
   hyphens: auto;
   hyphenate-limit-chars: 6 4 4;
+  -webkit-hyphenate-limit-before: 4;
+  -webkit-hyphenate-limit-after: 4;
   overflow-wrap: anywhere;
   color: var(--color-text-primary);
   background: var(--color-surface);
@@ -2659,10 +2661,22 @@ svg.weather-forecast__icon {
 
 /* Modul-Label als ruhiger Untertitel (Footnote, Sekundaerfarbe) - nie versal,
  * nie ueber dem Titel (Craft-Floor-Bann Eyebrow). */
+/* EINE ZEILE (#1698). Seit die Unterzeile eines Termins den Namen seines
+ * Kalenders traegt, steht dort Nutzereingabe: „Familienkalender Schule, Vereine
+ * und alle Arzttermine" braeche auf dem Telefon um und machte die Zeile hoeher
+ * als ihre Nachbarn. Die Zustandskarte spricht in einem Satz und darf weiter
+ * umbrechen. */
 .today-cockpit-card__sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--color-text-secondary);
   font-size: var(--type-caption);
   line-height: var(--line-height-tight);
+}
+
+.today-cockpit-card--state .today-cockpit-card__sub {
+  white-space: normal;
 }
 
 /* Zeit als trailing Detail: die Programm-Zeile beantwortet „wann", nicht „wie
@@ -4481,6 +4495,8 @@ button.today-cockpit__more--link {
   line-height: var(--line-height-snug);
   hyphens: auto;
   hyphenate-limit-chars: 6 4 4;
+  -webkit-hyphenate-limit-before: 4;
+  -webkit-hyphenate-limit-after: 4;
   overflow-wrap: anywhere;
 }
 
@@ -5397,8 +5413,17 @@ button.today-cockpit__more--link {
  * Ausstieg und Timer-Startknoepfen, und der Stapel rechnet dort mit einer
  * Tab-Leiste, die hier gar nicht steht: der Hinweis beim Einschalten lag am
  * Telefon acht Sekunden lang auf „5 Min" und nahm den Tipp. Oben steht nur die
- * Uhr, die nichts annimmt. Die Lage neben einem offenen Dialog
- * (`[data-dock]`, utils/toast-placement.js) bleibt dessen Sache. */
+ * Uhr, die nichts annimmt.
+ *
+ * DAS IST DIE AUSGANGSLAGE, NICHT DAS LETZTE WORT (#1917). Die Uhr nimmt
+ * keinen Tipp, aber sie ist das, wofuer die Flaeche da ist, und bis rund 834px
+ * Breite lag der Hinweis acht Sekunden auf ihr (390x844: Uhrzeit und Datum zu
+ * 100 % verdeckt). Uhr und Fuss tragen deshalb `data-toast-keepout`
+ * (pages/dashboard.js), und utils/toast-placement.js schiebt den Stapel von
+ * hier aus an die naechste freie Kante - am Telefon direkt unter das Datum,
+ * am Desktop bleibt er stehen, weil er neben der Uhr Platz hat. Gesetzt wird
+ * die Lage wie neben einem Dialog ueber `[data-dock]`; diese Regel gilt, solange
+ * der Platzierer nichts zu sagen hat. */
 [data-wall-mode] .shell-bottom-stack:not([data-dock]) {
   top: calc(var(--safe-area-inset-top) + var(--space-4));
   bottom: auto;
@@ -5434,9 +5459,14 @@ button.today-cockpit__more--link {
    * zwei Metern ablesbar sein, ohne der Uhr den Rang abzulaufen. */
   --wall-timer:      clamp(var(--text-4xl), 7vw, var(--text-5xl));
 
+  /* Der Abstand zwischen Uhr, Buehne und Fuss. Als Variable, weil der Fuss
+   * aus ihm die Hoehe seiner Scroll-Kante und seinen Endabstand rechnet
+   * (`.wall__foot`, #1917). */
+  --wall-gap:        clamp(var(--space-4), 3vmin, var(--space-8));
+
   display: flex;
   flex-direction: column;
-  gap: clamp(var(--space-4), 3vmin, var(--space-8));
+  gap: var(--wall-gap);
   min-height: 100dvh;
   padding: var(--wall-pad);
   background: var(--color-bg);
@@ -5616,10 +5646,24 @@ button.today-cockpit__more--link {
   }
 }
 
+/* AUCH DIE UNTERZEILE BLEIBT EINE ZEILE (#1698). Bis dahin stand dort ein
+ * Wort aus der App („Termin", „Aufgabe"); seit sie den Namen des Kalenders
+ * traegt, steht dort Nutzereingabe - „Familienkalender Schule und Vereine"
+ * braeche um und kostete die Hoehe, die WALL_ROW_CAP fuer vier Zeilen
+ * gerechnet hat. */
 .wall-row__sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--wall-row-sub);
   line-height: var(--line-height-tight);
   color: var(--color-text-secondary);
+}
+
+/* Die Zustandszeile des leeren Tages spricht in einem Satz („Als Naechstes
+ * morgen: …") und steht allein - sie darf umbrechen wie bisher. */
+.wall-row--state .wall-row__sub {
+  white-space: normal;
 }
 
 .wall-row__time {
@@ -5627,6 +5671,18 @@ button.today-cockpit__more--link {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   color: var(--color-text-secondary);
+}
+
+/* DAS ENDE WEICHT, WO DIE ZEILE ZU SCHMAL IST (#1698). Auf dem Wandtablet
+ * nimmt „9:30 PM - 11:30 PM" 161 von 617px Zeilenbreite. Auf einer Flaeche
+ * unter Tablettbreite - jemand hat den Schalter auf dem Telefon erwischt -
+ * waren es 132 von 254px: die Uhrzeit breiter als der Titel, der dann nach elf
+ * Zeichen umbrach. Dort bleibt der Beginn allein, wie vor #1698. Dieselbe
+ * Grenze wie beim Titel darueber. */
+@container wall (max-width: 519px) {
+  .wall-row__time-end {
+    display: none;
+  }
 }
 
 .wall-row__time--overdue {
@@ -5661,9 +5717,10 @@ button.today-cockpit__more--link {
 }
 
 /* ── Wer heute dran ist ── */
-/* Gesichter, nicht Namenszeilen. Die Zahl am Rand sagt, wie viel von heute
- * jemanden angeht; WAS es ist, steht links im Programm und wird hier bewusst
- * nicht wiederholt. */
+/* Gesichter, darunter die Aufgaben von heute beim Namen (#1817). Die Zahl am
+ * Rand sagt, was noch offen ist. Ohne Titel - niemand hat eine Aufgabe, oder
+ * die Flaeche hat keinen Platz dafuer (`fitWallWho`) - bleibt es bei der
+ * Reihe von Gesichtern. */
 .wall-who__list {
   list-style: none;
   margin: 0;
@@ -5734,6 +5791,113 @@ button.today-cockpit__more--link {
   white-space: nowrap;
   font-size: var(--wall-row-sub);
   color: var(--color-text-secondary);
+}
+
+/* MIT TITELN wird aus der Reihe von Gesichtern ein Raster von Personen: das
+ * Gesicht mit dem Namen daneben als Kopf, darunter die Zeilen in voller
+ * Spaltenbreite. Ein Titel ist laenger als ein Vorname - unter einem 48px-
+ * Gesicht in einer 72px-Spalte stuende „Spuelma…".
+ *
+ * HOECHSTENS ZWEI NEBENEINANDER, und keine schmaler als drei Gesichter breit.
+ * `auto-fill` allein stellte auf einem grossen Schirm drei schmale Spalten
+ * hin und schnitt „Pack sports bag for t…" ab, waehrend die vierte Person
+ * allein in der zweiten Reihe stand (gemessen 1920x1080). Der Platz gehoert
+ * den Titeln, nicht einer dritten Spalte. */
+.wall-who__list--tasks {
+  --wall-who-cols: 2;
+  --wall-who-min: calc(var(--space-16) * 3);
+  --wall-who-gap: var(--space-5);
+  grid-template-columns: repeat(
+    auto-fill,
+    minmax(max(var(--wall-who-min), (100% - (var(--wall-who-cols) - 1) * var(--wall-who-gap)) / var(--wall-who-cols)), 1fr)
+  );
+  gap: var(--space-4) var(--wall-who-gap);
+  align-items: start;
+}
+
+/* Ab fuenf Personen drei nebeneinander: zwei Spalten ergaeben drei Reihen, und
+ * auf 1280x800 bliebe dann unter keinem Gesicht mehr Platz fuer einen Titel
+ * (gemessen: 214px fuer die Liste, drei Koepfe allein brauchen 176px). Eine
+ * schmalere Spalte, die den Anfang jeder Aufgabe nennt, sagt mehr als sechs
+ * Gesichter ohne ein Wort. Gezaehlt wird am Traeger (`:has`), wie beim
+ * Programm. */
+.wall-who__list--tasks:has(> :nth-child(5)) {
+  --wall-who-cols: 3;
+  --wall-who-min: calc(var(--space-16) * 2);
+  --wall-who-gap: var(--space-4);
+}
+
+.wall-who__list--tasks .wall-who__member {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  text-align: start;
+}
+
+.wall-who__list--tasks .wall-who__name {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.wall-who__tasks {
+  grid-column: 1 / -1;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0h);
+  min-width: 0;
+}
+
+/* EINE ZEILE JE AUFGABE, wie im Programm: ein Umbruch kostete die Hoehe einer
+ * weiteren Aufgabe, und die Zeilenzahl ist hier das knappe Gut. */
+.wall-who__task {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1h);
+  min-width: 0;
+  white-space: nowrap;
+  font-size: var(--wall-row-sub);
+  line-height: var(--line-height-snug);
+  color: var(--color-text-primary);
+}
+
+/* Erledigtes tritt zurueck, bleibt aber lesbar: Sekundaerfarbe statt
+ * Deckkraft, damit der Kontrast auf der Buehne der einer Unterzeile ist. Der
+ * Haken traegt den Zustand, kein Durchstreichen - durchgestrichene Schrift
+ * liest auf zwei Metern niemand. */
+.wall-who__task--done {
+  color: var(--color-text-secondary);
+}
+
+.wall-who__task-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wall-who__task-check {
+  flex: none;
+  width: 1em;
+  height: 1em;
+  color: var(--color-success-ink);
+}
+
+.wall-who__task--more {
+  color: var(--color-text-tertiary);
+}
+
+/* Alles erledigt: die Marke am Gesicht traegt den Haken statt einer Zahl. */
+.wall-who__count--done {
+  min-height: var(--space-8);
+  color: var(--color-success-ink);
+}
+
+.wall-who__count--done svg {
+  width: 1em;
+  height: 1em;
 }
 
 .wall-who__more,
@@ -5907,13 +6071,74 @@ button.today-cockpit__more--link {
    * Kante hindurch -, und unten haelt er den Abstand der Flaeche, mindestens
    * aber die Safe-Area (Home-Indikator). `--nav-tail` ist im Wandmodus 0
    * (layout.css, Leiste ausgeblendet) - dieselbe Regel wie jede klebende
-   * Fusszeile im Inhalt (test:mobile-chrome). */
+   * Fusszeile im Inhalt (test:mobile-chrome).
+   *
+   * OBEN HAT ER KEIN POLSTER MEHR, DAFUER DEN ENDABSTAND DER FLAECHE (#1917).
+   * Dort stand ein deckender Streifen von `--space-2` mit Gegenrand, und er
+   * machte die Oberkante hart. Jetzt haelt der Fuss zum Inhalt davor genau die
+   * Hoehe seiner Scroll-Kante: der Abstand der Flaeche (`gap`) plus dieser
+   * Rand ergeben `--wall-foot-edge`. Am Scrollende und bei passender Wand
+   * steht der letzte Eintrag damit frei UEBER der Kante.
+   *
+   * ER WOHNT HIER UND NICHT AM SCROLLPORT (`.app-content`): ein Nachlauf dort
+   * laege HINTER dem Fuss. Der Fuss klebt nur innerhalb der Flaeche; endete
+   * die Flaeche ueber der Unterkante des Scrollports, hoebe sie den Fuss am
+   * Scrollende mit an, und die Kante laege weiter auf der letzten Zeile. Der
+   * Endabstand des Inhalts ist der Abstand VOR dem Fuss.
+   *
+   * `--wall-foot-edge` IST DIE EINE ZAHL FUER BEIDES: die Kante liest sie als
+   * Hoehe, der Rand hier als Endabstand - sie koennen nicht auseinanderlaufen.
+   * Auf der Wand ist sie der Abstand der Flaeche selbst: der Rand ist dann 0,
+   * die Flaeche keinen Pixel hoeher als zuvor (1280x800 passt weiter - eine
+   * Wand scrollt nicht), und die Kante liegt im leeren Streifen. Am Telefon
+   * hebt die Containerregel darunter sie auf die Hoehe eines Gesichts. */
+  --wall-foot-edge: var(--wall-gap);
+
   position: sticky;
   bottom: var(--nav-tail);
   z-index: 1;
-  margin-block: calc(-1 * var(--space-2)) calc(-1 * var(--wall-pad));
-  padding-block: var(--space-2) max(var(--wall-pad), var(--safe-area-inset-bottom));
+  margin-block: calc(var(--wall-foot-edge) - var(--wall-gap)) calc(-1 * var(--wall-pad));
+  padding-block: 0 max(var(--wall-pad), var(--safe-area-inset-bottom));
   background: var(--color-bg);
+}
+
+/* Das Telefon - dieselbe Grenze wie bei Zeilentitel und Zeitspanne oben:
+ * schmaler als jedes Wandtablet, alles gestapelt, die Flaeche scrollt ohnehin
+ * (`wallIsStacked`). Nur dort kostet der Endabstand nichts, was die Wand
+ * braucht, und nur dort verdeckte der Fuss Gesichter. */
+@container wall (max-width: 519px) {
+  .wall__foot {
+    --wall-foot-edge: var(--space-12);
+  }
+}
+
+/* DIE SCROLL-KANTE DES FUSSES (#1917). Am Telefon ist die Flaeche laenger als
+ * das Bild, der Fuss klebt, und sein deckender Grund schnitt "Wer heute dran
+ * ist" an einer unsichtbaren harten Kante ab: bei 390x844 ein Gesicht ganz
+ * und eines halb verdeckt, ohne jedes Zeichen, dass es darunter weitergeht.
+ * Abgeschnitten war nichts - es fehlte die Kante. Jetzt laeuft der Inhalt in
+ * einem Verlauf vom Grund der Flaeche unter die Leiste aus.
+ *
+ * EINE FESTE KANTE, IN JEDEM BROWSER DIESELBE (`--wall-foot-edge`): am Telefon
+ * so hoch wie ein Gesicht. Niedriger traegt sie dort nicht - mit dem Abstand
+ * der Flaeche allein (16px) sah man von ihr nichts, sobald die Kante des
+ * Fusses in eine Luecke zwischen zwei Zeilen fiel (gemessen 390x844). Sie
+ * braucht keinen Zustand, kein Skript und keine Bewegung: der Endabstand des
+ * Fusses ist genau ihre Hoehe, am Ende des Scrollwegs und bei passender Wand
+ * liegt sie also auf leerem Grund derselben Farbe und ist unsichtbar.
+ *
+ * Kein Tipp bleibt an ihr haengen (`pointer-events: none`). Die Farbe ist die
+ * des Grundes selbst, in beiden Themen und nachts dieselbe Variable; es
+ * entsteht keine neue Flaeche und kein Licht (DESIGN.md, Der Wand-Modus:
+ * genau ein gefuellter Traeger). Die Achse ist die Blockachse, in RTL gleich. */
+.wall__foot::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  inset-block-end: 100%;
+  block-size: var(--wall-foot-edge);
+  background: linear-gradient(to bottom, transparent, var(--color-bg));
+  pointer-events: none;
 }
 
 .wall__foot > :first-child {
@@ -5924,13 +6149,31 @@ button.today-cockpit__more--link {
   justify-self: end;
 }
 
+.wall__foot-end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 /* Eine Zeile braucht Platz fuer beides: fuenf Startknoepfe (340px) und je
- * Aussenspalte einen wachen Ausstieg samt Beschriftung (220px, de). Fehlt er,
- * werden die Aussenspalten ungleich und die Mitte rutscht wieder (gemessen: bei
- * einer 800px breiten Flaeche um 26px). Die Bedienung bekommt dann eine eigene
- * Zeile ueber Stand und Ausstieg; der alte Fuss lief bei 390px sogar rechts
- * aus dem Bild (Ausstieg wach bei 356-478). Gefragt wird die FLAECHE
- * (`container: wall`, siehe `.wall`), nicht das Fenster. */
+ * Aussenspalte die Gruppe am Ende - den Ausstieg samt Beschriftung (220px, de)
+ * und seit #1766 daneben den Schoner-Knopf (48px plus 8px Abstand), zusammen
+ * 276px. Fehlt der Platz, werden die Aussenspalten ungleich und die Mitte
+ * rutscht wieder (gemessen: bei einer 800px breiten Flaeche um 26px). Die
+ * Bedienung bekommt dann eine eigene Zeile ueber Stand und Ausstieg; der alte
+ * Fuss lief bei 390px sogar rechts aus dem Bild (Ausstieg wach bei 356-478).
+ * Gefragt wird die FLAECHE (`container: wall`, siehe `.wall`), nicht das
+ * Fenster.
+ *
+ * DIE SCHWELLE BLEIBT, DIE RESERVE SCHRUMPFT. Ab 1024px Flaeche hat jede
+ * Aussenspalte 326px (1024 - 340 - 2 x 16, halbiert): fuer de 50px Luft statt
+ * 106. Gemessen mit Knopf, alle Sprachen: bei 1024px Flaeche stehen die
+ * Startknoepfe in 23 von 26 mittig, ab 1192px in allen. Dazwischen reicht es
+ * den drei laengsten Ausstiegen nicht (ru bis 14px, pt-BR bis 9px, el bis
+ * 58px versetzt; el rutschte dort schon ohne Knopf). Der Versatz steht still -
+ * die Gruppe ist schlafend und wach gleich breit -, der Nachtipp trifft also
+ * denselben Knopf. Eine hoehere Schwelle naehme dafuer jeder Sprache bis
+ * rund 1140px die eine Zeile. */
 @container wall (max-width: 1023px) {
   .wall__foot {
     grid-template-columns: minmax(0, 1fr) auto;
@@ -5941,6 +6184,37 @@ button.today-cockpit__more--link {
     grid-column: 1 / -1;
     grid-row: 1;
     justify-self: center;
+  }
+
+  /* MIT DEM SCHONER-KNOPF REICHT DIE ZWEITE ZEILE NICHT MEHR IN JEDER SPRACHE
+   * (#1766). Auf 390px bleiben 342px: Stand, Knopf und Ausstieg brauchen in de
+   * 366. Das Raster oben drueckt die Stand-Spalte dann unter die Breite ihres
+   * laengsten Wortes, und der Stand liegt UNTER dem Knopf (gemessen: ru 43px,
+   * uk 20px). Hier bricht deshalb der Inhalt um, nicht die Spalte: der Stand
+   * gibt zuerst nach und laeuft auf zwei Zeilen (die Fusshoehe bleibt, er ist
+   * auch zweizeilig niedriger als der Knopf), aber nie unter sein laengstes
+   * Wort. Reicht selbst das nicht, rutscht die Gruppe als Ganzes in eine
+   * dritte Zeile. Ohne den Knopf - also auch solange ein Timer laeuft - gilt
+   * das Raster wie bisher. */
+  .wall__foot:has(.wall__foot-btn--icon) {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .wall__foot:has(.wall__foot-btn--icon) > :first-child {
+    flex: 1 1 0;
+    min-inline-size: min-content;
+  }
+
+  .wall__foot:has(.wall__foot-btn--icon) > :nth-child(2) {
+    order: -1;
+    flex: 0 0 100%;
+    min-inline-size: 0;
+    justify-content: center;
+  }
+
+  .wall__foot:has(.wall__foot-btn--icon) > :last-child {
+    margin-inline-start: auto;
   }
 }
 
@@ -6004,6 +6278,23 @@ button.today-cockpit__more--link {
 .wall__foot-btn:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring-color);
   outline-offset: var(--focus-ring-offset);
+}
+
+/* DER SCHONER-START TRAEGT NUR SEIN ZEICHEN, IN JEDER BREITE (#1766). Mit Wort
+ * war die Gruppe aus Schoner und Ausstieg in de 416px breit und in jeder Sprache
+ * anders: die Aussenspalten wurden ungleich und die Startknoepfe rutschten
+ * (gemessen bis 100px, el bei 1280), auf 390px lag der Stand unter dem Knopf.
+ * Ein Kreis von `--target-lg` ist in jeder Sprache gleich breit.
+ *
+ * Das widerspricht dem Satz oben nicht: „mit Wort" gilt dem AUSSTIEG, weil ein
+ * namenloses Zeichen dort der einzige Weg hinaus war. Der Schoner ist ein
+ * Zusatzweg - wer ihn nicht erkennt, verliert nichts, er startet nach der
+ * Wartezeit ohnehin von selbst. Den Namen tragen `aria-label` und `title`. */
+.wall__foot-btn--icon {
+  justify-content: center;
+  inline-size: var(--target-lg);
+  padding: 0;
+  flex-shrink: 0;
 }
 
 /* ── Küchentimer (#844) ──────────────────────────────────────────────────────
@@ -6120,7 +6411,9 @@ button.today-cockpit__more--link {
 [data-wall-night] .wall-row__title,
 [data-wall-night] .wall-weather__temp,
 [data-wall-night] .wall-weather__range-high,
-[data-wall-night] .wall-weather__day-high {
+[data-wall-night] .wall-weather__day-high,
+[data-wall-night] .wall-who__task,
+[data-wall-night] .wall-who__list--tasks .wall-who__name {
   color: var(--color-text-secondary);
 }
 
@@ -6129,9 +6422,20 @@ button.today-cockpit__more--link {
 [data-wall-night] .clock-widget--wall .clock-widget__date,
 [data-wall-night] .wall-who__name,
 [data-wall-night] .wall-weather__desc,
-[data-wall-night] .wall-weather__day-label {
+[data-wall-night] .wall-weather__day-label,
+[data-wall-night] .wall-who__task--done,
+[data-wall-night] .wall-who__task--more,
+[data-wall-night] .wall-who__task-check,
+[data-wall-night] .wall-who__count--done {
   color: var(--color-text-tertiary);
 }
+
+/* Die Aufgaben unter den Gesichtern (#1817) gehen mit: der offene Titel und
+ * der Name darueber eine Stufe zurueck (oben), Erledigtes und die Zaehlzeile
+ * eine weitere - und der Haken gibt sein Gruen ab wie das Wetterzeichen sein
+ * Bernstein, am Titel wie an der Marke des Gesichts. Die Reihenfolge der
+ * beiden Regeln oben traegt die Stufen: `--done` und `--more` stehen in der
+ * spaeteren und gewinnen gegen `.wall-who__task`. */
 
 /* NACHTS GIBT DIE WAND IHRE FARBE AB, und der Wetterton macht da keine
  * Ausnahme. Der Nachtmodus senkt jede Stimme dieser Flaeche um eine Stufe,
@@ -6541,7 +6845,7 @@ button.today-cockpit__more--link {
 .nutrition-widget { display: grid; gap: var(--space-3); padding: var(--space-4); }
 .nutrition-widget__rows { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
 .nutrition-widget__row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: var(--space-2) var(--space-3); }
-.nutrition-widget__label { font-size: var(--text-sm); color: var(--color-text-secondary); min-width: 0; hyphens: auto; hyphenate-limit-chars: 6 4 4; overflow-wrap: anywhere; }
+.nutrition-widget__label { font-size: var(--text-sm); color: var(--color-text-secondary); min-width: 0; hyphens: auto; hyphenate-limit-chars: 6 4 4; -webkit-hyphenate-limit-before: 4; -webkit-hyphenate-limit-after: 4; overflow-wrap: anywhere; }
 .nutrition-widget__bar { grid-column: 1 / -1; grid-row: 2; display: block; block-size: var(--space-2); border-radius: var(--radius-full); background: var(--color-fill-well); overflow: hidden; }
 .nutrition-widget__fill { display: block; block-size: 100%; inline-size: 100%; transform: scaleX(var(--nutrition-scale, 0)); transform-origin: left center; border-radius: inherit; background: var(--module-health); }
 .nutrition-widget__bar--over .nutrition-widget__fill { background: var(--color-warning); }

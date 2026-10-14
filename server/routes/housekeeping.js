@@ -26,9 +26,9 @@ import {
   translate,
 } from '../utils/i18n.js';
 import {
-  OUTBOUND_SOURCES,
   mirroredFieldsChanged,
   queueEventDeletion,
+  markInlineOutbound,
 } from '../services/calendar-outbound.js';
 import { mayWriteModule, moduleAccessVerdict, MODULE_ACCESS_ALLOW } from '../permissions.js';
 import { documentVisibleSql } from '../services/document-access.js';
@@ -429,8 +429,9 @@ function createVisitCalendarEvent(database, worker, checkIn, actorId, title = nu
   const visitDate = visitDateOverride || checkIn.slice(0, 10);
   const result = database.prepare(`
     INSERT INTO calendar_events
-      (title, start_datetime, end_datetime, all_day, color, icon, assigned_to, created_by, external_source)
-    VALUES (?, ?, NULL, 1, ?, ?, ?, ?, 'local')
+      (title, start_datetime, end_datetime, all_day, color, icon, assigned_to, created_by, external_source,
+       series_authored)
+    VALUES (?, ?, NULL, 1, ?, ?, ?, ?, 'local', 1)
   `).run(
     title || visitTitleFallback(database, worker),
     visitDate,
@@ -520,11 +521,11 @@ function updateVisitLinks(database, session, worker, visitDate, dailyRate, extra
     //
     // Der Feldvergleich bleibt derselbe: mirroredFieldsChanged prüft genau die
     // Felder, die zum Provider gespiegelt werden.
-    const mirrored = after && OUTBOUND_SOURCES.includes(after.external_source) && !!after.external_calendar_id;
-    if (before && mirrored && mirroredFieldsChanged(before, after)) {
-      database.prepare(
-        'UPDATE calendar_events SET outbound_dirty = 1, outbound_attempts = 0 WHERE id = ?'
-      ).run(session.calendar_event_id);
+    //
+    // Ob die Zeile vormerkbar ist (gespiegelt, und bei CalDAV mit Konto, #1860),
+    // entscheidet markInlineOutbound - ein Leser mit birthdays.js.
+    if (before && mirroredFieldsChanged(before, after)) {
+      markInlineOutbound(database, after);
     }
   }
   if (session.payment_task_id) {

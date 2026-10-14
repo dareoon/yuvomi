@@ -24,8 +24,11 @@ import * as outbound from './calendar-outbound.js';
 import { decodeHtmlEntities } from '../utils/html-entities.js';
 import { nearestColorId } from '../utils/ical-color.js';
 // Fallback-Zone für den Outbound-Sync, wenn Google für den Zielkalender keine liefert.
-import { householdTimeZone } from '../utils/timezone.js';
-import { outboundEvent } from './outbound-dtstart.js';
+import {
+  configuredHouseholdTimeZone, householdTimeZone, localToUTCPrecise, shiftDateKey, utcToWall,
+} from '../utils/timezone.js';
+import { authoredAfterInbound, outboundEvent } from './outbound-dtstart.js';
+import { alignmentMoved, googleReading, isEcho, sentSnapshot } from './outbound-echo.js';
 import { assignDefaultToEvent, reassignDefaultOnCalendarMove } from './sync-assignment.js';
 import { countSourceEvents, deleteSourceEvents } from './calendar-prune.js';
 import { readSyncOutcome, withSyncOutcome } from './sync-outcome.js';
@@ -352,10 +355,11 @@ async function processPendingUpdates(calendar, colorMap = {}, metaCache = new Ma
     }
 
     try {
-      const gEvent = localEventToGoogle(fresh, colorMap, activeMeta?.timeZone || householdTimeZone(db.get()));
+      const { body: gEvent, snapshot } = buildGoogleRequest(fresh, colorMap, outboundTimeZone(activeMeta?.timeZone));
       await calendar.events.patch({ calendarId, eventId, requestBody: gEvent });
-      // Während des Patches Eingetroffenes bleibt vorgemerkt.
-      outbound.settleOutbound(fresh, movedTo, event);
+      // Während des Patches Eingetroffenes bleibt vorgemerkt. Der Schnappschuss
+      // (#1956) geht im selben Schreibvorgang.
+      outbound.settleOutbound(fresh, movedTo, event, { snapshot });
       done++;
     } catch (err) {
       // Mit dem Zähler des nachgeladenen Stands: eine Bearbeitung seit der Auswahl
@@ -758,7 +762,7 @@ async function runSync(createCalendar) {
         continue;
       }
       try {
-        const gEvent  = localEventToGoogle(event, eventColorMap, meta?.timeZone || householdTimeZone(db.get()));
+        const { body: gEvent, snapshot } = buildGoogleRequest(event, eventColorMap, outboundTimeZone(meta?.timeZone));
         const created = await calendar.events.insert({ calendarId: targetId, requestBody: gEvent });
         // refId aus den Metadaten: trägt Name und Farbe des Kalenders statt der
         // rohen ID als Notnamen.
@@ -767,12 +771,37 @@ async function runSync(createCalendar) {
         // Die elf `colorId`s sind eine verlustbehaftete Abbildung des Hex-Werts -
         // ohne das Flag holte der nächste Inbound-Lauf die gemappte Farbe zurück
         // und ersetzte damit die gewählte (#899).
-        db.get().prepare(`
+        // Gebucht wird gegen den Stand NACH dem await (#1926), und zwar in dem
+        // einen Schreibvorgang selbst: Spiegel wird nur die Zeile, die die
+        // Auswahl oben JETZT noch für diesen Kalender nennte. Wer inzwischen
+        // gelöscht wurde, sein Ziel gewechselt oder es für einen lokalen
+        // Kalender aufgegeben hat, bleibt, wie er ist - gebucht verlöre er den
+        // lokalen Kalender und stünde bei Google, obwohl ihn dort niemand mehr
+        // haben will. Der gerade angelegte Termin wird dann zum Löschen
+        // vorgemerkt; die Löschroute tut das für eine lokale Zeile nicht.
+        //
+        // Wer inzwischen BEARBEITET wurde (#1932), wird Spiegel und im selben
+        // Schreibvorgang als geändert vorgemerkt: bei Google liegt der Stand,
+        // aus dem die Anfrage gebaut wurde, und eine lokale Zeile merkt in der
+        // Route nichts vor. Als sauberer Spiegel ginge die Bearbeitung nie
+        // hinaus, und der nächste Inbound überschriebe sie mit dem alten Stand.
+        // Verglichen wird wie bei CalDAV und Apple (`bookEventUpload`) über die
+        // gespiegelten Felder; zwischen Nachlesen und Schreiben liegt kein await.
+        const now    = outbound.reloadEvent(event.id);
+        const edited = now && outbound.mirroredFieldsChanged(event, now) ? 1 : 0;
+        const booked = db.get().prepare(`
           UPDATE calendar_events
-          SET external_calendar_id = ?, external_source = 'google', calendar_ref_id = ?,
-              color_modified = CASE WHEN color IS NOT NULL THEN 1 ELSE color_modified END
-          WHERE id = ?
-        `).run(created.data.id, calRefId, event.id);
+          SET external_calendar_id = ?, external_source = 'google', local_calendar_id = NULL, calendar_ref_id = ?,
+              color_modified = CASE WHEN color IS NOT NULL THEN 1 ELSE color_modified END,
+              outbound_dirty = CASE WHEN ? = 1 THEN 1 ELSE outbound_dirty END,
+              outbound_attempts = CASE WHEN ? = 1 THEN 0 ELSE outbound_attempts END,
+              outbound_snapshot = ?
+          WHERE id = ? AND external_source = 'local' AND target_google_calendar_id = ?
+        `).run(created.data.id, calRefId, edited, edited, snapshot, event.id, targetId).changes > 0;
+        if (!booked) {
+          outbound.queueDeletion({ source: 'google', calendarExternalId: targetId, eventExternalId: created.data.id });
+          log.info(`Event ${event.id} stopped waiting for its upload to ${targetId} while it was in flight, queued the deletion of the created entry.`);
+        }
       } catch (err) {
         log.error(`Outbound error for event ${event.id}:`, err.message);
       }
@@ -959,24 +988,11 @@ function upsertGoogleEvents(items, calRefId = null, calColor = GOOGLE_COLOR, col
       if (master && date) insException.run(master.id, date);
     }
 
-    const allDay      = !!(item.start?.date && !item.start?.dateTime);
-    const startDt     = allDay ? item.start.date : (item.start?.dateTime || item.start?.date);
-    const endDt       = allDay
-      ? googleAllDayEndToInclusive(item.end?.date)
-      : (item.end?.dateTime || item.end?.date || null);
-    // Zeitzone der Serie (#829). Google liefert die IANA-Zone neben der Zeit;
-    // ohne sie wiederholt die Expansion den festen Offset des ersten Vorkommens
-    // und die Serie driftet über die Sommer-/Winterzeit-Grenze um eine Stunde -
-    // derselbe Fehler, der für CalDAV/Apple schon als #549 behoben wurde, nur
-    // hier nie nachgezogen. Ganztags-Termine tragen keine Zone.
-    const tzid        = allDay ? null : (item.start?.timeZone || calTimeZone || null);
+    const incoming    = inboundFields(item, calTimeZone);
+    let { allDay, startDt, endDt, tzid, rrule } = incoming;
     const title       = item.summary || '(kein Titel)';
     const description = item.description || null;
     const location    = item.location    || null;
-    // recurrence ist eine Liste von RFC-5545-Zeilen und enthält neben der RRULE
-    // auch EXDATE/RDATE. Gezielt die RRULE greifen statt blind die erste Zeile -
-    // steht ein EXDATE vorn, landete es sonst als Wiederholungsregel in der DB.
-    const rrule       = recurrenceRuleOf(item);
 
     // NUR die Eigenfarbe des Termins, aufgelöst aus Googles colorId (die API
     // liefert die Paletten-ID, nicht den Hex-Wert). Die Kalenderfarbe gehört
@@ -990,9 +1006,11 @@ function upsertGoogleEvents(items, calRefId = null, calColor = GOOGLE_COLOR, col
     // eigene Farbe folgerichtig keine colorId zurück.
     const evColor = (item.colorId && colorMap[item.colorId]) || null;
 
-    const existing = db.get().prepare(
-      'SELECT id, outbound_dirty, calendar_ref_id, start_datetime FROM calendar_events WHERE external_calendar_id = ? AND external_source = ?'
-    ).get(item.id, 'google');
+    const existing = db.get().prepare(`
+      SELECT id, outbound_dirty, calendar_ref_id, start_datetime, end_datetime, all_day, recurrence_rule, tzid,
+             series_authored, outbound_snapshot
+      FROM calendar_events WHERE external_calendar_id = ? AND external_source = ?
+    `).get(item.id, 'google');
 
     // Eine lokale Bearbeitung, die noch auf ihren Push wartet, darf der Inbound
     // nicht mit dem alten Google-Stand überschreiben (#593). Der Push kommt im
@@ -1016,15 +1034,34 @@ function upsertGoogleEvents(items, calRefId = null, calColor = GOOGLE_COLOR, col
       // muss; die Farbspalte wiederholt ihren SET-Ausdruck, damit eine lokale
       // Umfärbung (color_modified) nicht als Unterschied zählt. Die Bindings der
       // SET-Liste kommen dafür ein zweites Mal.
+      //
+      // DIE MARKE `series_authored` (#1935) faellt, wenn hier ein anderer Start
+      // oder eine andere Regel in die Zeile kommt, als dort stand - auch der
+      // ausgerichtete Start, den Yuvomi selbst hinaufgegeben hat
+      // (services/outbound-dtstart.js). Geschrieben wird wie bisher.
+      //
+      // DAS ECHO DES EIGENEN PUSHS (#1956, services/outbound-echo.js): liefert
+      // Google genau das zurueck, was der letzte ausgerichtete Push gesendet
+      // hat, und hat sich die Zeile seitdem nicht geaendert, bleiben Start,
+      // Ende, ganztaegig, Regel und Zone wie eingegeben, die Marke bleibt und
+      // die Erinnerungen wandern nicht. Die anderen Felder nimmt der Abruf.
+      const echo = isEcho(existing, googleReading(incoming));
+      if (echo) {
+        ({ start_datetime: startDt, end_datetime: endDt, recurrence_rule: rrule, tzid } = existing);
+        allDay = !!existing.all_day;
+      }
+      const authored = echo
+        ? existing.series_authored
+        : authoredAfterInbound(existing, { start_datetime: startDt, recurrence_rule: rrule });
       const values = [
-        title, description, startDt, endDt, allDay ? 1 : 0, location, rrule, tzid, evColor, calRefId,
+        title, description, startDt, endDt, allDay ? 1 : 0, location, rrule, tzid, evColor, calRefId, authored,
       ];
       db.get().prepare(`
         UPDATE calendar_events
         SET title = ?, description = ?, start_datetime = ?, end_datetime = ?,
             all_day = ?, location = ?, recurrence_rule = ?, tzid = ?,
             color = CASE WHEN color_modified = 0 THEN ? ELSE color END,
-            calendar_ref_id = ?
+            calendar_ref_id = ?, series_authored = ?
         WHERE id = ?
           AND (   title           IS NOT ?
                OR description     IS NOT ?
@@ -1036,6 +1073,7 @@ function upsertGoogleEvents(items, calRefId = null, calColor = GOOGLE_COLOR, col
                OR tzid            IS NOT ?
                OR color           IS NOT CASE WHEN color_modified = 0 THEN ? ELSE color END
                OR calendar_ref_id IS NOT ?
+               OR series_authored IS NOT ?
               )
       `).run(...values, existing.id, ...values);
       // In Google verschoben (#1377): die Erinnerungen ziehen mit.
@@ -1158,6 +1196,33 @@ function retireLegacyInstances(masterExternalId, seen) {
   }
 }
 
+/**
+ * Start, Ende, ganztaegig, Zone und Regel, wie sie der Abruf aus einem
+ * Google-Eintrag in die Zeile schreibt. EINE Stelle, weil der Sende-
+ * Schnappschuss (#1956) dieselbe Lesart auf den gesendeten Body anwendet.
+ *
+ * @param {object} item         Google-Eintrag (oder gesendeter Body)
+ * @param {string|null} calTimeZone  Zone des Kalenders, falls der Eintrag keine nennt
+ */
+function inboundFields(item, calTimeZone) {
+  const allDay  = !!(item.start?.date && !item.start?.dateTime);
+  const startDt = allDay ? item.start.date : (item.start?.dateTime || item.start?.date);
+  const endDt   = allDay
+    ? googleAllDayEndToInclusive(item.end?.date)
+    : (item.end?.dateTime || item.end?.date || null);
+  // Zeitzone der Serie (#829). Google liefert die IANA-Zone neben der Zeit;
+  // ohne sie wiederholt die Expansion den festen Offset des ersten Vorkommens
+  // und die Serie driftet über die Sommer-/Winterzeit-Grenze um eine Stunde -
+  // derselbe Fehler, der für CalDAV/Apple schon als #549 behoben wurde, nur
+  // hier nie nachgezogen. Ganztags-Termine tragen keine Zone.
+  const tzid    = allDay ? null : (item.start?.timeZone || calTimeZone || null);
+  // recurrence ist eine Liste von RFC-5545-Zeilen und enthält neben der RRULE
+  // auch EXDATE/RDATE. Gezielt die RRULE greifen statt blind die erste Zeile -
+  // steht ein EXDATE vorn, landete es sonst als Wiederholungsregel in der DB.
+  const rrule   = recurrenceRuleOf(item);
+  return { allDay, startDt, endDt, tzid, rrule };
+}
+
 // Yuvomi speichert getimte Events als "YYYY-MM-DDTHH:MM" (ohne Sekunden,
 // siehe validate.js). Die Google Calendar API verlangt RFC 3339 mit
 // Sekunden, sonst "Bad Request" bzw. bei Wiederholungen "Invalid
@@ -1172,7 +1237,18 @@ function toRfc3339(dt) {
 //   - all-day-Events (start.date):    UNTIL muss DATE sein (YYYYMMDD)
 //   - getimte Events (start.dateTime): UNTIL muss UTC DATE-TIME sein
 // Andernfalls lehnt Google die Recurrence ab ("Invalid recurrence rule").
-function normalizeRecurrenceUntil(rule, allDay) {
+//
+// EIN REINES DATUM AN EINER GETIMTEN SERIE IST DAS ENDE EINES ORTSTAGS (#1974).
+// Yuvomi liest `UNTIL=20351010` als Tag: das letzte Vorkommen ist das am 10.
+// Oktober, in der Zone, in der die Serie expandiert wird. Google rechnet die
+// Vorkommen in der mitgesendeten `timeZone` und vergleicht sie mit einem
+// UTC-Zeitpunkt. Bis hierher ging `T235959Z` hinaus, das Tagesende in UTC:
+// oestlich von UTC zeigte Google damit ein Vorkommen mehr (00:30 am 11. in
+// Berlin ist 22:30Z am 10.), westlich eines weniger. Die Grenze ist deshalb das
+// Ende des UNTIL-Tags in `timeZone` - eine Sekunde vor dem ERSTEN Augenblick des
+// Folgetags, nicht 23:59:59 als Wanduhr, damit ein Tag, an dem die Uhr um
+// Mitternacht springt oder zurueckgestellt wird, richtig endet.
+function normalizeRecurrenceUntil(rule, allDay, timeZone) {
   return rule.split(';').map((segment) => {
     const eq = segment.indexOf('=');
     if (eq === -1) return segment;
@@ -1180,23 +1256,99 @@ function normalizeRecurrenceUntil(rule, allDay) {
     const digits   = segment.slice(eq + 1).replace(/\D/g, '');
     const datePart = digits.slice(0, 8);
     if (allDay) return `UNTIL=${datePart}`;
-    const timePart = digits.length > 8 ? digits.slice(8, 14).padEnd(6, '0') : '235959';
-    return `UNTIL=${datePart}T${timePart}Z`;
+    if (digits.length > 8) return `UNTIL=${datePart}T${digits.slice(8, 14).padEnd(6, '0')}Z`;
+    return `UNTIL=${localDayEndUtc(datePart, timeZone)}`;
   }).join(';');
+}
+
+/**
+ * Das Ende des Ortstags `YYYYMMDD` in `timeZone` als `YYYYMMDDTHHMMSSZ`.
+ * Ohne lesbares Datum oder Zone bleibt es beim Tagesende in UTC.
+ *
+ * DER ERSTE AUGENBLICK DES FOLGETAGS. Wird die Uhr kurz nach Mitternacht
+ * zurueckgestellt, gibt es die erste Stunde des Folgetags zweimal (Asia/Amman,
+ * 29.10.2021: 00:59 +03 -> 00:00 +02). `localToUTCPrecise` nennt fuer "00:00"
+ * den spaeteren der beiden Zeitpunkte, und eine Grenze davor liesse Google das
+ * Vorkommen um 00:30 des ersten Durchgangs noch zeigen (RFC 5545 meint bei
+ * einer doppelten Ortszeit den ersten). Deshalb wird von dort minutenweise
+ * zurueckgegangen, solange die Wanduhr noch den Folgetag zeigt - hoechstens
+ * drei Stunden, weiter reicht keine Zeitumstellung.
+ */
+function localDayEndUtc(datePart, timeZone) {
+  const fallback = `${datePart}T235959Z`;
+  if (!/^\d{8}$/.test(datePart) || !timeZone) return fallback;
+  const dayKey = `${datePart.slice(0, 4)}-${datePart.slice(4, 6)}-${datePart.slice(6, 8)}`;
+  const nextDay = shiftDateKey(dayKey, 1);
+  let nextDayStartMs = Date.parse(localToUTCPrecise(`${nextDay}T00:00:00`, timeZone));
+  if (!Number.isFinite(nextDayStartMs)) return fallback;
+  for (let step = 0; step < 180; step++) {
+    const earlier = utcToWall(new Date(nextDayStartMs - 60000).toISOString(), timeZone);
+    if (!earlier || earlier.date < nextDay) break;
+    nextDayStartMs -= 60000;
+  }
+  return new Date(nextDayStartMs - 1000).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+}
+
+/**
+ * Die Zone, in der eine ausgehende Wanduhrzeit gemeint ist (#1875).
+ *
+ * `start_datetime` ist zonenlos, und gelesen wie geschrieben wird die Spalte
+ * überall in der Haushaltszone (`readStoredInstant`, die Kalender-Routen). Nur
+ * hier stand die Zone des ZIELKALENDERS vorn: steht der auf UTC, ging "14:00"
+ * als 14:00 UTC hinaus, lag in Amsterdam auf 16:00, und der nächste Inbound
+ * holte genau diesen verschobenen Zeitpunkt zurück.
+ *
+ * Reihenfolge:
+ *   1. die GESETZTE Haushaltszone - die einzige Aussage darüber, welche Uhr
+ *      gemeint war, als jemand "14:00" eintippte;
+ *   2. die Zone des Zielkalenders - ohne Einstellung die beste Auskunft, die es
+ *      gibt (#572: `TZ` ist im Container meist UTC und hat den Termin in
+ *      Australien um Stunden verschoben);
+ *   3. der Rückfall von `householdTimeZone()` (`TZ` → System → UTC).
+ *
+ * Ein Bestandshaushalt ohne Einstellung erlebt damit keinen Wechsel.
+ *
+ * @param {string|null|undefined} calendarTimeZone  Zone aus calendarList.get
+ * @returns {string} IANA-Zone
+ */
+function outboundTimeZone(calendarTimeZone) {
+  const database = db.get();
+  return configuredHouseholdTimeZone(database) || calendarTimeZone || householdTimeZone(database);
 }
 
 /**
  * Lokales Event → Google-Event-Body.
  * @param {object} event
  * @param {Record<string,string>} colorMap
- * @param {string} [timeZone]  IANA-Zone, in der Google die Wanduhrzeit interpretiert.
- *                             Normalerweise die Zone des Zielkalenders (siehe sync()).
+ * @param {string} [timeZone]  IANA-Zone, in der Google die Wanduhrzeit interpretiert
+ *                             (siehe outboundTimeZone()).
  */
-function localEventToGoogle(rawEvent, colorMap = {}, timeZone = householdTimeZone(null)) {
+function localEventToGoogle(rawEvent, colorMap = {}, timeZone = outboundTimeZone(null)) {
+  return buildGoogleRequest(rawEvent, colorMap, timeZone).body;
+}
+
+/**
+ * Der Google-Body UND sein Sende-Schnappschuss (#1956, services/outbound-echo.js).
+ *
+ * Der Schnappschuss ist das, was der Abruf aus genau diesem Body lesen wuerde
+ * (`inboundFields`), dazu der Zeilenstand, aus dem er entstand - und null,
+ * wenn das Ausrichten den Start nicht verschoben hat.
+ *
+ * @returns {{ body: object, snapshot: string|null }}
+ */
+function buildGoogleRequest(rawEvent, colorMap = {}, timeZone = outboundTimeZone(null)) {
+  const body = googleBody(rawEvent, colorMap, timeZone);
+  const aligned = alignmentMoved(rawEvent, { zone: timeZone });
+  return { body, snapshot: sentSnapshot(rawEvent, googleReading(inboundFields(body, null)), { aligned }) };
+}
+
+function googleBody(rawEvent, colorMap, timeZone) {
   // Start und Ende mit der eigenen Wiederholungsregel in Einklang (#986), bevor
   // irgendein Feld daraus abgeleitet wird - ein importiertes DTSTART bleibt
   // unberuehrt (#756). Begruendung in services/outbound-dtstart.js.
-  const event = outboundEvent(rawEvent);
+  // Ausgerichtet wird in der Zone, die unten als `timeZone` hinausgeht: in
+  // ihr rechnet Google die Vorkommen, nicht in der `tzid` der Zeile (#1935).
+  const event = outboundEvent(rawEvent, { zone: timeZone });
   const allDay = !!event.all_day;
   const gEvent = {
     summary:     event.title,
@@ -1244,8 +1396,8 @@ function localEventToGoogle(rawEvent, colorMap = {}, timeZone = householdTimeZon
     // timeZone lehnt Google Serien ab ("recurring events: field is required"),
     // mit einer festen Zone landet das Event bei allen Nutzern außerhalb dieser
     // Zone verschoben (Issue #572: Australien = +7,5 h gegenüber Europe/Berlin).
-    // Die Zone des Zielkalenders ist die, in der Google die Zeit anzeigt - damit
-    // steht in Google dieselbe Uhrzeit wie in Yuvomi.
+    // Welche Zone es ist, entscheidet outboundTimeZone() - die Uhrzeit selbst
+    // wird nie umgerechnet.
     const startDt = toRfc3339(event.start_datetime);
     const endDt   = toRfc3339(event.end_datetime) || startDt;
     gEvent.start = { dateTime: startDt, timeZone };
@@ -1253,7 +1405,7 @@ function localEventToGoogle(rawEvent, colorMap = {}, timeZone = householdTimeZon
   }
 
   if (event.recurrence_rule) {
-    gEvent.recurrence = [`RRULE:${normalizeRecurrenceUntil(rruleValue(event.recurrence_rule), allDay)}`];
+    gEvent.recurrence = [`RRULE:${normalizeRecurrenceUntil(rruleValue(event.recurrence_rule), allDay, timeZone)}`];
   }
 
   return gEvent;
@@ -1262,10 +1414,10 @@ function localEventToGoogle(rawEvent, colorMap = {}, timeZone = householdTimeZon
 export { getAuthUrl, handleCallback, getStatus, disconnect, clearMirroredEvents, sync,
          listCalendars, listSelection, setCalendarEnabled, setReadonly, flushOutbound };
 export const __test = {
-  localEventToGoogle, googleAllDayEndToInclusive, localAllDayEndToExclusive,
+  localEventToGoogle, buildGoogleRequest, googleAllDayEndToInclusive, localAllDayEndToExclusive,
   upsertGoogleEvents, upsertExternalCalendar, setReadonly, isReadonly, isWritableRole,
   listSelection, setCalendarEnabled, recordSyncToken, getSyncToken, enabledCalendarIds,
-  fetchEventColorMap, householdTimeZone,
+  fetchEventColorMap, householdTimeZone, outboundTimeZone,
   processPendingDeletions, pendingDeletionCount,
   processPendingUpdates, pendingUpdateCount,
   googleCalendarIdForEvent, currentGoogleCalendarId, loadCalendarMeta,

@@ -549,7 +549,8 @@ Inhalt, kein Verlauf ueber eine Karte, kein Text auf einer Flaeche, die nicht ge
   enthielten Kollisionspaare, die niemand auseinanderhalten konnte - zwei Violetts, zwei
   Teals. Jetzt gibt es neun klar trennbare Familien (`overview`, `time`, `work`, `kitchen`,
   `money`, `people`, `health`, `records`, `neutral`), jedes `--module-*` bezieht aus seiner,
-  und **innerhalb einer Familie unterscheidet das Siegel-Icon, nicht der Ton**. Damit
+  und **innerhalb einer Familie unterscheidet das Siegel-Icon, nicht der Ton** (an einer
+  Mischstelle darf es das Zeichen des Objekts sein, siehe Herkunfts-Regel). Damit
   verschwinden die Kollisionen strukturell statt durch Nachjustieren. Die Kueche war der
   Praezedenzfall: vier Module, ein Ton, unterschieden durch ihr Zeichen. Die privaten
   `--_family-*` tragen den Dark-Wechsel; die oeffentliche `--module-*`-API bleibt vollstaendig.
@@ -993,7 +994,9 @@ Subheadline 15, Footnote 13, Caption 2 11.
 und "SAUERSTOFFSAETTI/GUNG" kamen aus `overflow-wrap: break-word` neben `hyphens: manual`:
 das Wort brach dort, wo die Zeile endete, ohne Strich. Wer ein Wort brechen laesst, gibt
 seinem Subjekt `hyphens: auto; hyphenate-limit-chars: 6 4 4` (die App setzt `lang`, der
-Browser kennt die Silben); `overflow-wrap: anywhere` bleibt die letzte Stufe fuer
+Browser kennt die Silben), dazu direkt darunter `-webkit-hyphenate-limit-before: 4;
+-webkit-hyphenate-limit-after: 4`, weil Safari die Kurzform nicht kennt und sonst ohne Grenze
+trennt (#1774); `overflow-wrap: anywhere` bleibt die letzte Stufe fuer
 Zeichenketten ohne Silben (URLs, Codes, Zeitangaben). Versal-Labels, die nicht passen,
 werden kuerzer oder verlieren den Versal-Transform, statt mitten im Wort zu brechen. Der
 Guard (`test:typography`) prueft die Regel am Subjekt, nicht die Schreibweise, und fuehrt
@@ -1517,7 +1520,11 @@ Toast, die uebrigen stehen `inert` als `.toast--tucked` bereit. Ein Dialog mit e
 Kopf- oder Fusszeile zeichnet sie mit `data-dialog-actions` aus; das Register dazu fuehrt
 `test:toast-placement`. Im Wand-Modus steht der Stapel ohne offenen Dialog OBEN statt unten
 (#1559, siehe „Der Wand-Modus"): dort gibt es keine Tab-Leiste, mit der er rechnet, und unten
-liegen Ausstieg und Timer-Knoepfe.
+liegen Ausstieg und Timer-Knoepfe. **Sperrzonen ohne Dialog (#1917):** was `data-toast-keepout`
+traegt, haelt der Stapel frei wie eine Bedienleiste, auch wenn kein Dialog offen ist - er nimmt
+dann die naechste freie Kante, in seiner eigenen Breite und Mitte. Die Regel haengt am Attribut,
+nicht an einer Seite; gesetzt ist es an Uhrzeit, Datum und Fuss der Wand, wo der Hinweis beim
+Einschalten bis rund 834px Breite acht Sekunden auf der Uhr lag.
 
 ## Shapes
 
@@ -3125,7 +3132,10 @@ Herkunft zeigt man nur, wo sie nicht selbstverstaendlich ist. Daraus folgen gena
 - **Jede MISCHSTELLE** - eine Liste, deren Zeilen aus verschiedenen Modulen stammen
   (moduluebergreifende Suche, "Heute wichtig", Dashboard-Widget-Koepfe, "Mehr"-Liste,
   Benachrichtigungsdarstellung) - gibt jedem Objekt sein Siegel und BENENNT dabei die fremde
-  Herkunft, inline oder ueber die Klasse ihres Traegers.
+  Herkunft, inline oder ueber die Klasse ihres Traegers. Die Herkunft nennt der TON der
+  Scheibe; das ZEICHEN darf das des Objekts sein, wo das Objekt eines traegt (der Mahlzeittyp,
+  das am Termin gewaehlte Icon in "Heute wichtig" und an der Wand). Ohne eigenes Zeichen steht
+  das des Moduls, und eine Zeile, die fuer mehrere Objekte spricht, behaelt es immer.
 - **Im eigenen Modul** steht es genau einmal, als Absender im Kopf (siehe Modulkopf). Es
   benennt dort nichts, sondern ERBT den Ton des Raumes, in dem es steht - genau daran ist die
   Rolle zu erkennen.
@@ -3686,6 +3696,20 @@ Gangart.** Gelesen wird sie aus zwei Metern und ohne Beruehrung; alles Weitere f
 diesem einen Satz. Der Screensaver bleibt der ruhende Zustand und legt sich nach seiner
 Leerlaufzeit unveraendert darueber.
 
+**Eine geteilte Flaeche, kein persoenlicher Bildschirm** (#1817). Die Wand haengt in der Kueche,
+gleich aus wessen Sitzung sie geoeffnet wurde - sie zeigt deshalb nur, was der ganze Haushalt
+sehen darf: Aufgaben und Termine mit Sichtbarkeit "alle", Termine aus Abos nur aus geteilten.
+Was einer Person allein gehoert, steht an keiner Stelle der Wand, auch nicht fuer sie selbst,
+und wer nur darueber "dran" waere, erscheint nicht unter den Gesichtern. Dasselbe gilt fuer
+Beitraege ohne Sichtbarkeitsstufe, die nur dem Betrachter gelten: die eigene Dosis, die eigene
+Schicht, die eigene Erinnerung, wartende Freigaben. Sie fehlen an jeder Wand, wie auf einem
+gekoppelten Display - ohne Ersatzzeile und ohne Luecke: das Programm rueckt zusammen, und ein
+Tag ohne Zeile sagt "Heute frei". Durchgesetzt am Leser (`audience=household`), nicht im
+Browser. Uebersicht und Heute-Blatt bleiben persoenlich. Die Antwort fuer die Wand ist eine
+Allowlist: sie traegt nur die Quellen, die die Flaeche zeichnet - Notizen, Geld (Budget,
+geteilte Ausgaben, offener Lohn), Schnellzugriffe und Countdowns erreichen das Geraet nicht,
+und ein neues Modul steht erst an der Wand, wenn es dort einen Platz bekommen hat.
+
 **Die Shell tritt ab.** Sidebar und Tab-Leiste sind Arm-Laengen-Moebel; auf zwei Metern sind
 sie siebzehn unleserliche Ziele. Auch die Installations-Einladung verschwindet - auf einer
 Anzeige, die niemand bedient, waere sie die lauteste Karte im Bild.
@@ -3712,6 +3736,18 @@ Umbruch kostet die Hoehe einer ganzen weiteren Zeile, und die Flaeche hat sechs 
 sie scrollen muesste. Die Zaehler an den Gesichtern sind aus derselben Rechnung keine
 Mikro-Badges, sondern volle Marken mit Kante - eine 13px-Marke an einem 56px-Gesicht waere aus
 zwei Metern Dekoration.
+
+**Unter jedem Gesicht stehen die Aufgaben von heute beim Namen, und die Zeilenzahl folgt dem
+Platz** (#1817). Die Zahl sagt, DASS etwas offen ist, der Titel sagt WAS. Offene zuerst in
+Primaerfarbe, darunter das heute Erledigte in Sekundaerfarbe mit Haken - kein Durchstreichen,
+keine Deckkraft: auf zwei Metern liest beides niemand. Mit Titeln wird aus der Reihe der
+Gesichter ein Raster von Personen (Gesicht und Vorname als Kopf, die Zeilen in voller
+Spaltenbreite; ab fuenf Personen drei Spalten). Weil die Wand nicht scrollt, steigt
+`fitWallWho` eine Leiter von Budgets hinab, bis das Bild passt: erst weichen die Haken, auf der
+ganzen Flaeche, dann die offenen Titel; was nicht passt, ist eine Zahl ("+2 weitere"), und die
+letzte Stufe ist die Reihe der Gesichter wie zuvor. Gemessen bei 1280x800: vier Personen tragen
+drei Zeilen, sechs tragen zwei. Nachts geht die Liste mit der Wand: offener Titel und Name eine
+Stufe zurueck, Erledigtes und Zaehlzeile eine weitere, und der Haken gibt sein Gruen ab.
 
 **Nachtabsenkung nach UHRZEIT, nicht nach Farbmodus.** Zwischen 22 und 6 Uhr traegt die Wurzel
 `data-wall-night` und der dunkle Grund wird erzwungen, auch bei hellem Theme: das Problem im
@@ -3741,8 +3777,16 @@ er `--wall-pad`, mindestens die Safe-Area. Keine Regel nach Geraeteklasse: `stic
 wenn der Platz fehlt, und Polster und Gegenrand heben sich im Fluss auf (1280x800 passt weiter,
 `test:dashboard-surface-browser`). **Meldungen stehen auf der Wand OBEN**: unten liegen Ausstieg
 und Timer-Startknoepfe, und der Hinweis beim Einschalten lag am Telefon acht Sekunden auf „5 Min".
-Oben steht nur die Uhr, die nichts annimmt. Die Lage neben einem offenen Dialog (`[data-dock]`)
-bleibt Sache der Ausweich-Regel des Toast-Stapels.
+Oben steht die Uhr; sie nimmt keinen Tipp, ist aber Sperrzone (#1917), und wo der Stapel sie
+traefe, rueckt er direkt unter das Datum. Die Lage neben einem offenen Dialog (`[data-dock]`)
+bleibt Sache der Ausweich-Regel des Toast-Stapels. **Der klebende Fuss hat eine Scroll-Kante**
+(#1917): ueber ihm laeuft der Inhalt in einem Verlauf zum Grund der Flaeche aus, statt an einer
+unsichtbaren harten Kante mitten im Gesicht zu enden. Sie ist statisch, in jedem Browser
+dieselbe, und ihre Hoehe `--wall-foot-edge` ist zugleich der Endabstand vor dem Fuss: am
+Scrollende steht der letzte Eintrag frei ueber ihr. Auf der Wand ist sie der Abstand der
+Flaeche selbst (`--wall-gap`, die Flaeche wird keinen Pixel hoeher), am Telefon (Flaeche unter
+520px, dieselbe Grenze wie beim Zeilentitel) `--space-12`, die Hoehe eines Gesichts. Kein
+Zustand, kein Skript, keine Bewegung, kein Tipp bleibt an ihr haengen.
 
 **Die Startknoepfe der Kuechenuhr ruhen sichtbar, und die erste Beruehrung weckt nur**
 (2026-09-23). Unsichtbare Knoepfe, die trotzdem auf Beruehrung reagierten, waren eine Falle:
