@@ -75,6 +75,92 @@ import {
 
 const member = { role: 'member' };
 const admin = { role: 'admin' };
+
+test('extension settings sheet renders each section once inside its scope block', async () => {
+  const registry = await import('../public/settings/registry.js');
+  const { __test } = await import('/settings/shell.js');
+  const { installMiniDom, MiniElement } = await import('./mini-dom.js');
+  const restore = installMiniDom();
+  // The mini DOM has no selectors on purpose; this sheet only needs class lookups.
+  const { querySelector, querySelectorAll } = MiniElement.prototype;
+  const walk = (node) => (node.childNodes ?? []).flatMap((child) => [child, ...walk(child)]);
+  MiniElement.prototype.querySelectorAll = function (selector) {
+    const name = selector.replace(/^:scope > /, '').slice(1);
+    return walk(this).filter((node) => node.className?.split(' ').includes(name));
+  };
+  MiniElement.prototype.querySelector = function (selector) { return this.querySelectorAll(selector)[0] ?? null; };
+  const entry = `data:text/javascript,${encodeURIComponent(`
+    export async function render(container, { section, user, query }) {
+      container.textContent = JSON.stringify({ section, userId: user.id, source: query.get('source') });
+    }
+  `)}`;
+  registry.setExtensionSettingsModules([{
+    id: 'section-test', name: 'Section test', enabled: true, status: 'enabled',
+    settings: { entry, sections: ['household', 'mine'] },
+  }]);
+  try {
+    const path = '/settings/modules/ext/section-test';
+    const domain = SETTINGS_DOMAINS.find((item) => item.id === 'modules');
+    for (const [user, expected] of [
+      [{ id: 1, role: 'admin' }, ['mine', 'household']],
+      [{ id: 2, role: 'member' }, ['mine']],
+    ]) {
+      const content = document.createElement('div');
+      const leaf = registry.findSettingsLeaf(path, user);
+      await __test.renderLeafContent(content, leaf, domain, user, new URLSearchParams('source=direct'));
+      const scopes = [...content.querySelectorAll('.settings-scope')];
+      assert.deepEqual(scopes.map((group) => group.className), expected.map((scope) => `settings-scope settings-scope--${scope}`));
+      for (const [index, group] of scopes.entries()) {
+        const hosts = group.querySelectorAll('.settings-sheet-section');
+        assert.equal(hosts.length, 1, 'each declared section renders once');
+        assert.deepEqual(JSON.parse(hosts[0].textContent), { section: expected[index], userId: user.id, source: 'direct' });
+      }
+      assert.equal(content.querySelector('.settings-leaf-header__description'), null,
+        'a module without description gets no empty paragraph');
+    }
+  } finally {
+    Object.assign(MiniElement.prototype, { querySelector, querySelectorAll });
+    registry.setExtensionSettingsModules([]);
+    restore();
+  }
+});
+
+test('extension settings sheet carries the navigation name and icon of its module', async () => {
+  const registry = await import('../public/settings/registry.js');
+  const base = { id: 'name-test', name: 'Manifest name', enabled: true, status: 'enabled', menu: { label: 'Menu label' } };
+  const label = (module) => {
+    registry.setExtensionSettingsModules([module]);
+    return registry.settingsLeafLabel(registry.findSettingsLeaf('/settings/modules/ext/name-test', { role: 'admin' }), (key) => key);
+  };
+  try {
+    assert.equal(label({ ...base, settings: { entry: '/x.js', sections: ['mine'] } }), 'Menu label');
+    assert.equal(label({ ...base, settings: { entry: '/x.js', sections: ['mine'], labelKey: 'settings.title' } }), 'Menu label',
+      'an untranslated settings.labelKey falls back to the navigation name');
+    assert.equal(label({ ...base, menu: {}, settings: { entry: '/x.js', sections: ['mine'] } }), 'Manifest name');
+    const icon = (module) => {
+      registry.setExtensionSettingsModules([{ ...base, settings: { entry: '/x.js', sections: ['mine'] }, ...module }]);
+      return registry.findSettingsLeaf('/settings/modules/ext/name-test', { role: 'admin' }).icon;
+    };
+    assert.equal(icon({ icon: 'star', menu: { icon: 'sparkles' } }), 'sparkles');
+    assert.equal(icon({ icon: 'star', menu: {} }), 'star');
+    assert.equal(icon({ menu: {} }), 'box');
+  } finally {
+    registry.setExtensionSettingsModules([]);
+  }
+});
+
+test('router wires extension settings sheets into routes, titles and module sync', async () => {
+  const router = await readFile(new URL('../public/router.js', import.meta.url), 'utf8');
+  const sync = router.slice(router.indexOf('async function syncThirdPartyModules('), router.indexOf('function allRoutes('));
+  assert.match(sync, /setExtensionModules\(_thirdPartyModules\);\s*setExtensionSettingsModules\(_thirdPartyModules\);/,
+    'the settings sheets follow the same module list as the navigation');
+  const routes = router.slice(router.indexOf('function allRoutes('));
+  assert.match(routes, /const settingsRoutes = extensionSettingsPaths\(\)\.map\([\s\S]{0,200}?page: '\/pages\/settings\.js'[\s\S]{0,120}?titleKey: 'nav\.settings'/);
+  assert.match(routes, /return \[\.\.\.ROUTES, \.\.\.settingsRoutes, \.\.\.moduleRoutes\];/);
+  const title = router.slice(router.indexOf('function routeTitle('), router.indexOf('function updateBranding('));
+  assert.match(title, /allRoutes\(\)\.find\(\(route\) => route\.path === path\)\?\.titleKey/,
+    'an extension sheet reads its Settings title from the generated route');
+});
 const registryTranslationKeys = [
   ...SETTINGS_DOMAINS.map((domain) => domain.labelKey),
   ...SETTINGS_LEAVES.flatMap((leaf) => [leaf.labelKey, leaf.descriptionKey]),
@@ -572,7 +658,7 @@ test('Mitglieder erreichen ihre eigenen Termin-Vorgaben', () => {
   const sheet = findSettingsLeaf('/settings/personal/calendar', member);
   assert.equal(sheet?.id, 'module-calendar');
   assert.deepEqual(settingsSheetSections(sheet, member).map((entry) => entry.id),
-    ['personal-calendar', 'personal-calendar-subscriptions', 'personal-feeds']);
+    ['personal-calendar', 'personal-calendar-subscriptions', 'personal-feeds', 'feed-birthdays']);
   // Der haushaltweite Teil bleibt adminOnly.
   assert.deepEqual(settingsSheetSections(sheet, admin).filter((entry) => entry.adminOnly).map((entry) => entry.id),
     ['modules-calendar', 'sync-calendar']);
@@ -3094,6 +3180,7 @@ test('R14: jeder Export steht im Blatt seines Moduls', async () => {
   assert.equal(home('personal-feeds').sheetId, 'module-calendar', 'der Kalender-Feed bleibt im Kalender');
   assert.equal(home('personal-feeds').props?.part, 'calendar');
   for (const [id, sheet, part] of [
+    ['feed-birthdays', 'module-calendar', 'birthdays'],
     ['feed-schedule', 'module-schedule', 'schedule'],
     ['feed-cycle', 'module-health', 'cycle'],
     ['feed-inventory', 'module-inventory', 'inventory'],
@@ -3279,9 +3366,9 @@ test('R16: ein Blatt mit mehr als drei Abschnitten fuehrt Sprungmarken auf seine
 
   const calendar = settingsSheetJumpTargets(sheet('module-calendar'), admin);
   assert.deepEqual(calendar.map((target) => target.id),
-    ['personal-calendar', 'personal-calendar-subscriptions', 'personal-feeds', 'modules-calendar', 'sync-calendar'],
+    ['personal-calendar', 'personal-calendar-subscriptions', 'personal-feeds', 'feed-birthdays', 'modules-calendar', 'sync-calendar'],
     'in der Reihenfolge des Blatts: erst "Fuer mich", dann der Haushalt');
-  assert.equal(calendar[4].url, '/settings/modules/calendar?section=sync-calendar', 'dasselbe Ziel wie die Umleitungen');
+  assert.equal(calendar[5].url, '/settings/modules/calendar?section=sync-calendar', 'dasselbe Ziel wie die Umleitungen');
   assert.equal(calendar[0].labelKey, 'settings.pageCalendarDefaults', 'die Marke heisst wie der Abschnitt in der Registry');
 
   // Drei Abschnitte sind ein Blick, keine Navigation.
@@ -3593,7 +3680,7 @@ test('R17: kein Einstellungsblatt rendert eine Karte mit genau einem Bedieneleme
     'personal-appearance', 'personal-notifications', 'admin-family', 'modules-countdowns',
     'personal-calendar', 'personal-feeds', 'modules-calendar', 'options-schedule', 'options-tasks',
     'options-budget', 'options-housekeeping', 'options-health', 'modules-rewards', 'personal-health',
-    'feed-schedule', 'feed-cycle', 'feed-inventory', 'feed-waste',
+    'feed-birthdays', 'feed-schedule', 'feed-cycle', 'feed-inventory', 'feed-waste',
   ];
   for (const id of GROUPED) {
     const html = rendered.get(id) ?? '';
@@ -3768,7 +3855,7 @@ test('R17: die Sprungmarken heissen wie die Ueberschriften der Abschnitte, nicht
   assert.match(fn, /link\.textContent = text/);
   assert.match(shell, /link\.dataset\.jumpSection = target\.id/, 'die Marke weiss, zu welchem Traeger sie gehoert');
   const section = shell.slice(shell.indexOf('async function renderSheetSection('), shell.indexOf('async function renderLeafContent('));
-  assert.match(section, /await module\.render\(host, \{ user, query \}\);[\s\S]*?syncJumpLabels\(host\.closest\?\.\('\.settings-leaf'\)\)/,
+  assert.match(section, /await module\.render\(host, \{ user, query, section: section\.scope \}\);[\s\S]*?syncJumpLabels\(host\.closest\?\.\('\.settings-leaf'\)\)/,
     'jeder fertige Abschnitt zieht seine Marke nach, auch nach der Wartefrist');
   const leaf = shell.slice(shell.indexOf('async function renderLeafContent('), shell.indexOf('function levelScopedHeadings('));
   assert.match(leaf, /await awaitSections\([\s\S]*?\);[\s\S]*?jump\?\.classList\.remove\('settings-sheet-jump--pending'\)/,
@@ -4045,4 +4132,43 @@ test('Eigenes Modul: die Dateigroesse folgt der Locale', async () => {
   // Kein von Hand gebautes Kuerzel mehr.
   const src = await readFile(new URL('../public/settings/pages/modules-install.js', import.meta.url), 'utf8');
   assert.doesNotMatch(src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, ''), /toFixed\(|['`] ?MB['`]|['`] ?KB['`]/);
+});
+
+
+test('birthday subscription belongs to calendar settings and explains its household-wide contents under the link', async () => {
+  const { FEEDS } = await import('../public/settings/pages/personal-feeds.js');
+  assert.equal(FEEDS.birthdays.path, '/birthdays/feed');
+  assert.equal(FEEDS.birthdays.text.hint(), 'settings.birthdayFeedHint');
+  const section = SETTINGS_SECTIONS.find(item => item.id === 'feed-birthdays');
+  assert.equal(section.props.part, 'birthdays');
+  assert.equal(section.sheetId, 'module-calendar');
+  assert.equal(section.adminOnly, false);
+});
+
+
+test('calendar feed birthday switch persists changes and restores its visual state after an API failure', async () => {
+  const { render } = await import('../public/settings/pages/personal-feeds.js');
+  const previous = globalThis.__apiStub;
+  const previousWindow = globalThis.window;
+  globalThis.window = { yuvomi: { showToast() {} } };
+  const input = { checked: true, disabled: false, addEventListener(_type, listener) { this.change = listener; } };
+  let html = '';
+  const host = { dataset: { part: 'calendar' }, replaceChildren() {}, insertAdjacentHTML(_where, markup) { html = markup; },
+    querySelector(selector) { return selector === '#feed-include-birthdays' ? input : null; } };
+  const writes = [];
+  try {
+    globalThis.__apiStub = { get: async () => ({ data: { url: 'https://example.test/feed/calendar/token.ics', includeBirthdays: true } }),
+      put: async (path, body) => { writes.push([path, body]); } };
+    await render(host);
+    assert.match(html, /id="feed-include-birthdays"/);
+    input.checked = false;
+    await input.change({ currentTarget: input });
+    assert.deepEqual(writes, [['/calendar/feed', { includeBirthdays: false }]]);
+    assert.equal(input.disabled, false);
+    globalThis.__apiStub.put = async () => { throw new Error('Rejected'); };
+    input.checked = true;
+    await input.change({ currentTarget: input });
+    assert.equal(input.checked, false, 'failed save restores the previous choice');
+    assert.equal(input.disabled, false);
+  } finally { globalThis.__apiStub = previous; globalThis.window = previousWindow; }
 });

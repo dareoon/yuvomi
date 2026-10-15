@@ -159,7 +159,8 @@ const STUBS = {
     // dasselbe Muster wie __apiStub in /api.js.
     export const getRRuleValues = () => globalThis.__rruleValues ?? ({});
     export const describeRRule = () => '';
-    export const recurrenceRow = () => ({ icon: 'repeat', label: '', value: '' });
+    // Wer die Verdrahtung der Detailzeile pruefen will, setzt globalThis.__recurrenceRow.
+    export const recurrenceRow = (...args) => globalThis.__recurrenceRow?.(...args) ?? ({ icon: 'repeat', label: '', value: '' });
     export const intervalUnitLabel = () => '';
   `,
   '/components/modal.js': `
@@ -236,8 +237,12 @@ const STUBS = {
     export const btnLoading = () => () => {};
     export const btnSuccess = () => {};
     export const btnError = () => {};
-    export const refocusAfterRender = () => {};
-    export const renderKeepingFocus = (render) => { render(); return null; };
+    // Wer sehen will, OB eine Seite den Fokus nach dem Neuzeichnen
+    // zuruecktraegt, setzt globalThis.__refocusAfterRender.
+    export const refocusAfterRender = () => { globalThis.__refocusAfterRender?.(); };
+    // Wer sehen will, OB ein Neuzeichnen den Fokus mitnimmt, setzt
+    // globalThis.__renderKeepingFocus (bekommt den Neuaufbau mitgeliefert).
+    export const renderKeepingFocus = (render) => { globalThis.__renderKeepingFocus?.(render); render(); return null; };
     export const forgetRestore = () => {};
     // Die Fokus-Merker der Detailansicht (Popover): ohne Browser nichts zu merken.
     export const rememberFocus = () => null;

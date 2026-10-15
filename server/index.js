@@ -58,6 +58,7 @@ import quickLinksRouter from './routes/quick-links.js';
 import contactsRouter from './routes/contacts.js';
 import cardavRouter from './routes/cardav.js';
 import birthdaysRouter from './routes/birthdays.js';
+import * as birthdayIcs from './services/birthday-ics.js';
 import budgetRouter from './routes/budget.js';
 import subscriptionsRouter from './routes/subscriptions.js';
 import documentsRouter from './routes/documents.js';
@@ -89,6 +90,7 @@ import housekeepingRouter from './routes/housekeeping.js';
 import wasteRouter from './routes/waste/index.js';
 import modulesRouter from './routes/modules.js';
 import { listModules } from './services/modules.js';
+import { recoverInterruptedInstalls } from './services/module-install.js';
 import pushRouter from './routes/push.js';
 import emailRouter from './routes/email.js';
 import notificationsRouter from './routes/notifications.js';
@@ -496,6 +498,20 @@ app.get('/feed/calendar/:token.ics', feedLimiter, (req, res) => {
   }
 });
 
+app.get('/feed/birthdays/:token.ics', feedLimiter, (req, res) => {
+  try {
+    if (!birthdayIcs.findUserIdByFeedToken(db.get(), req.params.token)) {
+      return res.status(404).type('text/plain').send('Not found');
+    }
+    res.set('Cache-Control', 'private, no-store');
+    res.set('Content-Disposition', 'inline; filename="yuvomi-birthdays.ics"');
+    res.type('text/calendar; charset=utf-8').send(birthdayIcs.buildBirthdayFeed(db.get()));
+  } catch (err) {
+    log.error('Birthday feed', err);
+    res.status(500).type('text/plain').send('Internal error');
+  }
+});
+
 // Eigenständiger Feed für Inventar-Garantiefristen (Stufe 4) - getrennt vom
 // Haushaltskalender-Feed oben, siehe server/services/inventory-deadlines-ics.js.
 app.get('/feed/inventory-deadlines/:token.ics', feedLimiter, (req, res) => {
@@ -855,6 +871,10 @@ async function runSync() {
 // drops unknown ext:* rows, and moduleAccessVerdict is a deny-list — a missing
 // key means allow. Starting the scan inside the listen callback left that window
 // open until the first GET /api/v1/modules (or /permissions/catalog).
+// Davor: ein Ersetzen, das ein Neustart zwischen seinen zwei Umbenennungen
+// abgeschnitten hat, holt die alte Fassung aus `.backup-<id>-*` zurueck, damit
+// schon die erste Liste das Modul wieder kennt. Wirft nie.
+await recoverInterruptedInstalls();
 try {
   await listModules({ admin: true });
 } catch (err) {
