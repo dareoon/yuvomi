@@ -25,7 +25,6 @@
         "filtersActive": "Aktivní filtry: {{count}}",
         "filtersActive_one": "1 aktivní filtr",
         "filtersActive_few": "{{count}} aktivní filtry",
-        "filtersReset": "Zrušit všechny filtry",
         "filtersResetDefault": "Zrušit filtry",
         "close": "Zavřít",
         "add": "Přidat",
@@ -68,6 +67,7 @@
         "errorServer": "Chyba serveru. Zkuste to prosím později znovu.",
         "errorRestoreInProgress": "Právě se obnovuje záloha. Vaše změna nebyla uložena, zkuste to znovu za minutu.",
         "errorTimeout": "Připojení trvalo příliš dlouho. Zkuste to prosím znovu.",
+        "errorRateLimited": "Právě přichází příliš mnoho požadavků. Chvíli počkejte a zkuste to znovu.",
         "requiredFields": "Vyplňte prosím všechna povinná pole.",
         "invalidInput": "Neplatný vstup.",
         "togglePasswordVisibility": "Zobrazit/skrýt heslo",
@@ -1187,7 +1187,6 @@
         "filtersActive": "Aktivní filtry: {{count}}",
         "filtersActive_one": "1 aktivní filtr",
         "filtersActive_few": "{{count}} aktivní filtry",
-        "filtersReset": "Zrušit všechny filtry",
         "filtersDisplay": "Zobrazení",
         "agendaDayEmpty": "Nic naplánováno",
         "openInMap": "Otevřít v Mapách",
@@ -3349,7 +3348,8 @@
         "unsavedChanges": "Zahodit změny?",
         "unsavedChangesDetail": "Tvoje zadané údaje v tomto formuláři budou ztraceny.",
         "discardChanges": "Zahodit",
-        "moreSettings": "Další nastavení"
+        "moreSettings": "Další nastavení",
+        "moreDetails": "Další údaje"
     },
     "search": {
         "emptyHint": "Piš a přejdi do oblasti nebo něco vytvoř. Od 2 znaků najdeš i své záznamy, dokonce podle části slova.",
@@ -5170,6 +5170,12 @@
             },
             "col": {
                 "day": "Den"
+            },
+            "intensity": {
+                "none": "Neuvedeno",
+                "low": "Nízká",
+                "moderate": "Střední",
+                "high": "Vysoká"
             }
         },
         "export": {
@@ -6244,7 +6250,8 @@
         "odometerChartTitle": "Stav tachometru v čase",
         "detailPaneLabel": "Podrobnosti předmětu",
         "pickOne": "Vyberte předmět",
-        "pickOneHint": "Údaje, termíny a historie se zobrazí zde."
+        "pickOneHint": "Údaje, termíny a historie se zobrazí zde.",
+        "moreDetailsHint": "Nákup, záruka, fotka, dokumenty"
     },
     "documentAttach": {
         "label": "Přílohy",

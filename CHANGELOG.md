@@ -20,7 +20,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without changing other calendar subscriptions. A personal "Include birthdays" switch on the
   existing calendar feed is on by default; turn it off when using both feeds to avoid duplicates.
 
+### Changed
+
+- **One set of controls in every module header.** Search, view, filter and more sit in the same order
+  and look the same everywhere, and every view picker is the same segmented control. The calendar
+  header on a desktop is one row with a real search field (two rows instead of three on a tablet);
+  on a phone the view picker names the current view and "Today" sits on the period label. Tasks on a
+  phone keep search, filter and more beside the title, so the list starts about 50px higher. Settings
+  on a desktop shows the module header like every other module.
+- **Task and calendar filters open the same sheet.** People are chips, layers and calendars are
+  switches, "Assigned to me" is in the same place in both, and there is one "Reset filters".
+- **Tabs and adding work the same way across modules.** Rewards and household-help tabs are plain
+  text like every other module. Health areas, fasting included, add through their one button and
+  empty states no longer repeat it; an empty shift plan opens on Shift types with one way to add one;
+  the week planner shows a plus only in empty cells; the waste first-run screen offers import once.
+  Shopping quick-add fields match the search field, and the More sheet groups modules like the sidebar.
+- **Rows offer the same more button everywhere.** Tasks and birthdays show it on phones too, and
+  swiping stays as a shortcut. Housekeeping visits open their report on tap with edit, pay and delete
+  in one menu, as the same row in overview, reports and staff log; all four tabs now fit on a phone.
+  Budget accounts and loans, and notes, moved their extra actions into the row's more menu; pinned
+  notes keep the same card with a filled pin. Group headings in contacts and notes share one style,
+  and Settings in the desktop sidebar gets the same gliding highlight as every other entry.
+- **More room for content on phones.** The budget balance row stays one line until you open it, so
+  bookings start about 100px higher; the documents folder picker is the first chip of the filter row;
+  all-day entries in the calendar week take one line with "+n". Lab results read as rows with
+  abnormal values first, and fasting no longer shows an empty ring before your first fast.
+- **Dialogs ask in a clearer order.** The meal dialog starts with the name and offers meal types as
+  chips, the inventory dialog folds purchase, warranty, photo and documents behind "More details",
+  the measured-at date in health looks like a field, and activity intensity is a translated choice.
+  A budget category keeps one color in overview, plan and statistics; the plan says "tight" or "over"
+  in words with an icon.
+- **Dialogs are real dialogs.** The page behind a dialog can no longer be reached by keyboard or
+  screen reader, Esc and the back gesture ask before discarding unsaved input, and the icon picker and
+  image cropper look and move like every other dialog.
+- **Smoother motion.** View-switch pills glide instead of jumping while the new view builds, page
+  changes finish their fade sooner so the next tap lands earlier, charts in health draw in like the
+  budget reports, and an empty state no longer fades in twice. With reduced motion, dialogs, page
+  changes and theme switches crossfade instead of cutting hard.
+
 ### Fixed
+
+- **Calendar: "Manage calendars" is reachable on tablets and phones again.** Below 1024px the
+  button was hidden along with the empty header slot, so calendars could not be created, recolored
+  or reordered there. The calendar filter now lists "Manage calendars" under its calendars, at
+  every width and even before the first calendar exists.
+
+- **Calendar: creating a calendar on a phone shows a usable name field.** In "Manage calendars"
+  on a narrow screen, the name field was squeezed to a sliver and the color picker stretched into a
+  wide bar. Name and color now sit side by side, with "Create calendar" below them.
+
+- **Too many requests are explained in your language.** When the server asks to slow down, the
+  app says so in the interface language instead of showing an English server message.
+
+- **Meals: clicking a meal with the mouse opens it again.** In the weekly planner a mouse click
+  on a meal did nothing except flash a drag preview, so on a desktop or trackpad a meal could only
+  be opened with the keyboard. A click now opens the meal, dragging starts only once the pointer
+  actually moves, and a meal dropped back on its own slot no longer opens afterwards.
+
+- **Google Calendar: a connection Google no longer accepts asks to reconnect** (#2019). When
+  Google refused the stored sign-in, for example after the seven days a project in the publishing
+  status Testing allows, Settings still showed Google as connected while nothing synced, and
+  deletions waiting for Google could be dropped. The card now says the sign-in has expired and
+  offers **Reconnect**, syncing pauses until then, and pending changes stay queued. A new sign-in
+  token that Google hands out during a refresh is now kept as well.
+
+- **A dropdown's open list stays dark in dark mode** (#2022). In Chrome on Windows the list
+  of a dropdown inside a form row, such as the type of a health measurement, turned white once
+  the pointer left it, with light text on it that was hard to read. The list now keeps the
+  colors of the current theme, and scrollbars and other built-in browser controls follow dark
+  mode as well.
+
+- **A task's due time on the calendar follows your time format** (#2018). With a region that uses
+  the 12-hour clock, such as American English, tasks in the month, week, day and agenda views
+  still showed their due time as "14:30". They now show "2:30 PM", like events and the rest of
+  the app.
+
+- **The phone tab bar reads more calmly.** "More" no longer looks like the active tab after you
+  switch pages, and the dimmed page behind the More sheet now fades out with the sheet instead of
+  vanishing at once. In dark mode the active tab and the module tiles in the More sheet stand out
+  more clearly; on tablets the More sheet is as wide as the tab bar below it. The tab bar is a
+  little taller, so its icons and labels no longer sit tight against its edge, and the add button
+  stays centered in it even when longer labels wrap onto two lines. Module icons in the tab bar,
+  sidebar and More sheet are drawn with a slightly stronger line that matches the icons around them.
+
+- **The desktop sidebar holds still.** When the collapsed sidebar opens under the pointer, every
+  entry now stays at the same height, so the pointer lands on the entry it was aiming for; the
+  collapsed sidebar shows a thin line between its groups instead. Counts such as overdue tasks sit
+  at the end of the row when the sidebar is open instead of covering the module icon, section
+  names line up with the icons, and on windows up to 800px tall every module fits without
+  scrolling. Pressing an entry darkens its row instead of shrinking it. When a page opens, the
+  highlight already sits on its entry instead of sliding in from the first one. The highlight
+  looks the same in light and dark mode: a violet pill with a violet edge that now stands out
+  clearly from the sidebar in both.
 
 - **Documents: leaving and coming back no longer leaves stale data on the page** (#2005). An
   answer that arrived only after you had left Documents and opened it again could overwrite the
@@ -29,6 +120,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in that window, or deleted only part of the folder's documents, now shows up on the new page
   right away instead of the deleted folder staying in the list until the next reload, and it no
   longer moves the keyboard focus on the new page.
+
+- **A save that answers late no longer closes a dialog you opened in the meantime** (#1997). On
+  Recipes (saving a recipe, planning it, linking ingredients to the pantry), Subscriptions
+  (saving a subscription, the monthly budget, categories and payment methods) and Documents
+  (uploading or editing a document, creating a folder, linking a document from a DMS), the success of a
+  slow request closes only the dialog it came from. If you had closed that dialog and opened
+  another one, the other one now stays open with what you typed in it. Linking ingredients no
+  longer redraws the recipe or moves focus once you have left the page, and the category dialog
+  no longer reopens over a dialog you opened while it was saving. Other pages follow.
 
 - **A server whose `TZ` names an unknown time zone now runs in UTC.** Without a household time zone
   in Settings, the server falls back to `TZ` and then to the zone the system reports. With `TZ` set

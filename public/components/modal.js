@@ -29,7 +29,7 @@ import { esc } from '/utils/html.js';
 import { pushOverlay, dropOverlay, isOverlayOpen } from '/utils/overlay-history.js';
 import { wireSheetDrag } from '/utils/sheet-drag.js';
 import { iconElement } from '/utils/lucide-icons.js';
-import { expandIn, durationToken } from '/utils/ux.js';
+import { expandIn, durationToken, easingToken } from '/utils/ux.js';
 
 let activeOverlay = null;
 let previouslyFocused = null;
@@ -90,9 +90,26 @@ let modalState = 'idle';
 export function captureModalContext() {
   return {
     generation: _modalGeneration,
+    // Der Dialog selbst, fuer closeModal({ context }): nur DIESEN darf ein
+    // spaeter Ablauf schliessen (#1997).
+    overlay: activeOverlay,
     route: `${window.location.pathname}${window.location.search}${window.location.hash}`,
     pageRoot: document.getElementById('main-content')?.firstElementChild ?? null,
   };
+}
+
+/**
+ * Ob der Dialog, der bei captureModalContext() offen war, noch der offene ist -
+ * derselbe Knoten, auch nach einer Rueckfrage, die ihn geparkt und
+ * zurueckgegeben hat. Die Regel hinter closeModal({ context }) (#1997); eine
+ * Seite fragt sie selbst nur fuer das, was AN DIESEM DIALOG haengt (etwa den
+ * Fokus nach dem Schliessen zurueckzutragen).
+ */
+export function isOwnModalOpen(context) {
+  // Schliessend zaehlt nicht als offen: activeOverlay zeigt bis _doClose()
+  // noch auf den Knoten, waehrend er schon ausfaehrt - der Nutzer hat ihn
+  // dann bewusst zugemacht, und nichts soll ihn danach neu aufbauen (Codex an #2021).
+  return Boolean(context?.overlay) && context.overlay === activeOverlay && modalState !== 'closing';
 }
 
 /** Ob seit captureModalContext() weder Dialog noch Seiteninstanz wechselte. */
@@ -204,7 +221,7 @@ function _syncOverlayRegistration() {
 async function _closeFromBackNavigation({ force = false } = {}) {
   await closeModal({ force });
   if (force) {
-    document.querySelectorAll('.modal-overlay').forEach((el) => el.remove());
+    document.querySelectorAll('.modal-overlay').forEach((el) => _removeOverlay(el));
   }
   _syncOverlayRegistration();
   return true;
@@ -565,8 +582,216 @@ export function swapFieldsKeepingDirtyBase(panel, swap) {
 // Escape-Handler
 // --------------------------------------------------------
 
+/**
+ * ESC GEHOERT DER OBERSTEN EBENE - UND DIESER HANDLER ENTSCHEIDET, NICHT DER
+ * BROWSER (D7, Critique 2026-10-16).
+ *
+ * Seit das Modal ein natives `<dialog>` ist, hat Esc einen zweiten Weg: den
+ * `cancel`-Request des Browsers. Ihm allein zu folgen geht nicht. Chrome laesst
+ * `cancel` nur EINMAL je Nutzeraktivierung abbrechen - gemessen (Chrome 155):
+ * das zweite Esc ohne Klick dazwischen meldet `cancelable: false` und schliesst
+ * den Dialog hart, an der Rueckfrage "Aenderungen verwerfen?" vorbei. Deshalb
+ * nimmt dieser Handler den Tastendruck selbst (`preventDefault` unterdrueckt
+ * den Request) und fuehrt ihn durch `closeModal()` samt Dirty-Guard.
+ *
+ * WEM DAS ESC GILT, sagt der naechste Besitzer des Ziels:
+ *   - das Modal selbst -> schliessen.
+ *   - ein Popover darin (Menue) oder ein eigenes natives `<dialog>` darueber
+ *     (Symbolauswahl, Zuschnitt) -> der Browser schliesst es per Request, hier
+ *     nichts tun.
+ *   - ein selbstgebautes `.modal-overlay`-Div darin (Kalender-Symbolwahl,
+ *     Hilfe) -> es schliesst mit eigenem Handler; hier nur den Request
+ *     unterdruecken, sonst ginge das Formular darunter mit zu.
+ * Ein Handler weiter unten, der Esc selbst erledigt (`defaultPrevented`, etwa
+ * der Datepicker), hat Vorrang.
+ */
 function onEscape(e) {
-  if (e.key === 'Escape') closeModal();
+  if (e === _escKeptBelow) _escKeptBelow = null;
+  if (e.key !== 'Escape' || e.defaultPrevented || !activeOverlay) return;
+  const owner = e.target?.closest?.('[popover], dialog, .modal-overlay') ?? null;
+  if (owner && owner !== activeOverlay) {
+    if (owner.matches('[popover], dialog')) return;
+    e.preventDefault();
+    return;
+  }
+  e.preventDefault();
+  closeModal();
+}
+
+/**
+ * EIN ESC, DAS EIN HANDLER DARUNTER FUER SICH BEHAELT, SCHLIESST AUCH PER
+ * `cancel` NICHT. Die Fasten-Hilfe, die Anhang-Auswahl und Menues schliessen
+ * ihre eigene Ebene auf Esc mit `stopPropagation()`; beim div-Overlay erreichte
+ * das Esc `onEscape` darum nie, und das Formular blieb stehen. Der native
+ * Dialog bekommt danach aber noch den Close-Request des Browsers - gemessen
+ * ging der ganze Einstellungsdialog mit dem Tooltip zu. Der Capture-Listener
+ * merkt sich jedes Esc; kommt es nicht bis `onEscape`, gehoert der folgende
+ * `cancel` desselben Tastendrucks nicht dem Modal. Der Browser schickt ihn
+ * in derselben Aufgabe, deshalb verfaellt die Marke mit der naechsten: die
+ * Zurueck-Geste (ein `cancel` ohne Esc) schliesst weiter.
+ */
+let _escKeptBelow = null;
+function onEscapeCapture(e) {
+  if (e.key !== 'Escape') return;
+  _escKeptBelow = e;
+  setTimeout(() => { if (_escKeptBelow === e) _escKeptBelow = null; }, 0);
+}
+
+function bindEscape() {
+  document.removeEventListener('keydown', onEscapeCapture, true);
+  document.addEventListener('keydown', onEscapeCapture, true);
+  document.removeEventListener('keydown', onEscape);
+  document.addEventListener('keydown', onEscape);
+}
+
+function unbindEscape() {
+  document.removeEventListener('keydown', onEscapeCapture, true);
+  document.removeEventListener('keydown', onEscape);
+  _escKeptBelow = null;
+}
+
+// --------------------------------------------------------
+// Top-Layer (natives <dialog>, D7)
+// --------------------------------------------------------
+
+/**
+ * Was ueber einem offenen Dialog sichtbar UND bedienbar bleiben muss: der
+ * untere Shell-Stapel (Toasts, Sammelpille). Ein modaler Dialog macht alles
+ * ausserhalb seiner selbst inert - auch ein Popover in der Top-Layer, gemessen
+ * (Chrome 155): weder ein vorher noch ein nachher gezeigtes Popover ausserhalb
+ * nimmt Fokus. Ein Toast mit "Rueckgaengig" waere ueber dem Formular nur noch
+ * ein Bild. Er zieht deshalb fuer die Dauer des Dialogs IN den obersten Dialog
+ * und kehrt danach an seinen Platz zurueck. Er bleibt `position: fixed` am
+ * Viewport; die Lage rechnet weiter utils/toast-placement.js.
+ */
+const TOP_LAYER_GUESTS = '.shell-bottom-stack';
+const _guestHome = new WeakMap();
+
+/** Der oberste bedienbare Shared-Dialog: offen, nicht geparkt, nicht im Ausgang. */
+function _topmostSharedDialog() {
+  const open = [...document.querySelectorAll('dialog.modal-overlay')]
+    .filter((d) => d.open && !d.inert && !d.classList.contains('modal-overlay--closing'));
+  return open[open.length - 1] ?? null;
+}
+
+/** Gaeste in den obersten Dialog holen oder nach Hause schicken. `leaving` zieht sie sicher heraus. */
+function _syncTopLayerGuests(leaving = null) {
+  if (typeof document.querySelectorAll !== 'function') return;
+  let host = _topmostSharedDialog();
+  if (host === leaving) host = null;
+  for (const guest of document.querySelectorAll(TOP_LAYER_GUESTS)) {
+    if (host) {
+      if (guest.parentElement === host) continue;
+      if (!_guestHome.has(guest)) _guestHome.set(guest, { parent: guest.parentElement, next: guest.nextSibling });
+      host.append(guest);
+      continue;
+    }
+    const home = _guestHome.get(guest);
+    if (!home) continue;
+    _guestHome.delete(guest);
+    if (!home.parent?.isConnected) { document.body.append(guest); continue; }
+    home.parent.insertBefore(guest, home.next?.parentNode === home.parent ? home.next : null);
+  }
+}
+
+/** Ein Overlay aus dem Dokument nehmen - vorher die Gaeste herausholen, sonst gingen Toasts mit. */
+function _removeOverlay(overlay) {
+  if (overlay?.querySelector?.(TOP_LAYER_GUESTS)) _syncTopLayerGuests(overlay);
+  overlay?.remove?.();
+}
+
+/**
+ * In die Top-Layer: `showModal()` macht den Hintergrund inert, faengt Tab im
+ * Dialog und legt `::backdrop` darunter. Ohne `<dialog>`-Unterstuetzung (Node-
+ * Sonden) bleibt es beim Div-Verhalten.
+ */
+function _enterTopLayer(overlay) {
+  if (typeof overlay?.showModal === 'function' && !overlay.open && overlay.isConnected) {
+    overlay.showModal();
+  }
+  _syncTopLayerGuests();
+}
+
+/**
+ * AUS DER TOP-LAYER AM ANFANG DES AUSGANGS, NICHT AM ENDE.
+ *
+ * Bliebe der Dialog bis nach seiner Animation modal, waere die Seite noch
+ * 150-400 ms inert - und wer nach `await closeModal()` ein Feld fokussiert
+ * (Restore-Dialog, neu gezeichnete Listen), fokussierte ins Leere. `close()`
+ * hebt die Sperre sofort; `.modal-overlay--closing` haelt den Knoten sichtbar
+ * (layout.css), jetzt als gewoehnliche Ebene auf `--z-modal`, mit der Abdunklung
+ * auf ihm selbst statt auf `::backdrop` (das gibt es ausserhalb der Top-Layer
+ * nicht) - dieselbe Blende wie vorher.
+ *
+ * Der Browser gibt beim `close()` den Fokus an das Element zurueck, das ihn vor
+ * `showModal()` hatte. Das ist hier gemerkt (`_nativeRestored`), damit
+ * `_doClose()` es nicht fuer eine Wahl des Aufrufers haelt und sein Nachfassen
+ * (Ausloeser weggerendert) trotzdem scharf stellt.
+ */
+function _leaveTopLayer(overlay) {
+  if (typeof overlay?.close !== 'function' || !overlay.open) {
+    _syncTopLayerGuests(overlay);
+    return;
+  }
+  const vorher = document.activeElement;
+  overlay._closingByModal = true;
+  overlay.close();
+  const nachher = document.activeElement;
+  if (nachher && nachher !== vorher && !overlay.contains(nachher)) overlay._nativeRestored = nachher;
+  _syncTopLayerGuests(overlay);
+}
+
+/**
+ * Der Browser hat einen Dialog geschlossen, den niemand hier geschlossen hat:
+ * ein Close-Request, dessen `cancel` sich nicht abbrechen liess (Zurueck-Geste
+ * auf Android ohne Aktivierung, siehe onEscape). Der Knoten steht noch im
+ * Dokument, nur nicht mehr in der Top-Layer. Er kommt zurueck - in der alten
+ * Reihenfolge, geparkte zuerst - und der Request laeuft danach regulaer durch
+ * `closeModal()`, damit ungespeicherte Eingaben ihre Rueckfrage bekommen.
+ */
+function _onNativeClose(event) {
+  const overlay = event.currentTarget;
+  if (overlay._closingByModal || !overlay.isConnected) return;
+  if ((overlay._restacking ?? 0) > 0) { overlay._restacking -= 1; return; }
+  const fokus = document.activeElement;
+  const stapel = [...document.querySelectorAll('dialog.modal-overlay')]
+    .filter((d) => d.isConnected && !d._closingByModal && typeof d.showModal === 'function');
+  for (const d of stapel) {
+    if (d.open) { d._restacking = (d._restacking ?? 0) + 1; d.close(); }
+  }
+  for (const d of stapel) _enterTopLayer(d);
+  if (fokus?.isConnected && activeOverlay?.contains(fokus)) fokus.focus();
+  _syncTopLayerGuests();
+  if (overlay === activeOverlay && modalState === 'open') closeModal();
+}
+
+/**
+ * UNTER REDUZIERTER BEWEGUNG BLENDET DAS MODAL UEBER statt hart zu schneiden
+ * (Critique 2026-10-16) - nur Opacity, keine Bewegung. Per Web Animations,
+ * nicht per CSS: die globale Sperre (reset.css) setzt jede CSS-Animation auf
+ * 0s, und eine CSS-Transition griffe nicht - die Einfahrt haelt Opacity per
+ * `forwards` fest, und der Wechsel aus der Top-Layer im Ausgang verwirft den
+ * Vorher-Stil (gemessen, Chrome 155: kein Transition-Objekt).
+ * @returns {Animation|null}
+ */
+function _reducedMotion() {
+  return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function _fade(el, from, to) {
+  if (typeof el?.animate !== 'function') return null;
+  return el.animate([{ opacity: from }, { opacity: to }], {
+    duration: durationToken('--duration-sm', 150),
+    easing: easingToken('--ease-out'),
+    fill: to === 0 ? 'forwards' : 'none',
+  });
+}
+
+/** Close-Request (Esc ohne unseren Handler, Zurueck-Geste): durch closeModal(). */
+function _onCancel(event) {
+  event.preventDefault();
+  if (_escKeptBelow) { _escKeptBelow = null; return; }
+  if (event.currentTarget === activeOverlay && modalState === 'open') closeModal();
 }
 
 // --------------------------------------------------------
@@ -676,6 +901,18 @@ function _suspendActiveModal() {
   return token;
 }
 
+/**
+ * Geparkte Dialoge, deren Ablauf inzwischen fertig ist (#1997): closeModal({
+ * context }) traf sie unter einer Rueckfrage an. Beim Zurueckholen gehen sie
+ * zu; bestaetigt der Nutzer stattdessen das Verwerfen, gehen sie ohnehin zu.
+ */
+const _closeOnResume = new WeakSet();
+
+/** Geparkt heisst: noch im Dokument und `inert` - das setzt nur _suspendActiveModal. */
+function _isParked(overlay) {
+  return Boolean(overlay?.isConnected) && overlay.inert === true && overlay !== activeOverlay;
+}
+
 // Dialog beendet, Modal darunter lebt weiter → exakt wiederherstellen.
 function _resumeSuspendedModal({ overlay, id, title, titleId, snapshot, dirtyGuard = true, restoreFocus, trigger }) {
   /* ES GIBT NICHTS ZURUECKZUHOLEN, WENN DER KNOTEN WEG IST (#871).
@@ -696,6 +933,11 @@ function _resumeSuspendedModal({ overlay, id, title, titleId, snapshot, dirtyGua
   // Vor dem Setzen des Fokus: ein inertes Element nimmt keinen an.
   overlay.inert = false;
   activeOverlay = overlay;
+  // Geparkt war er weiter offen - es sei denn, der Browser hat ihn mit der
+  // Rueckfrage zusammen geschlossen (ein Close-Request ohne Aktivierung
+  // schliesst die ganze Gruppe). Dann zurueck in die Top-Layer; die Gaeste
+  // (Toasts) ziehen zu ihm zurueck.
+  _enterTopLayer(overlay);
   _initialFormSnapshot = snapshot;
   _dirtyGuardEnabled = dirtyGuard;
   previouslyFocused = restoreFocus;
@@ -703,8 +945,7 @@ function _resumeSuspendedModal({ overlay, id, title, titleId, snapshot, dirtyGua
   modalState = 'open';
   // Der Dialog hat den Escape-Handler beim Schließen abgemeldet; ohne das
   // erneute Anmelden reagiert das wiederhergestellte Modal nicht mehr auf Esc.
-  document.removeEventListener('keydown', onEscape);
-  document.addEventListener('keydown', onEscape);
+  bindEscape();
   // Das Formular ist wieder da - und damit auch sein Anspruch auf die
   // Zurueck-Geste (#871). Hat der Bestaetigungsdialog den Eintrag beim
   // Schliessen mitgenommen, kommt er hier zurueck.
@@ -717,6 +958,8 @@ function _resumeSuspendedModal({ overlay, id, title, titleId, snapshot, dirtyGua
   if (trigger?.isConnected && overlay.contains(trigger) && typeof trigger.focus === 'function') {
     trigger.focus();
   }
+  // Waehrend er geparkt lag, ist sein Speichern fertig geworden (#1997).
+  if (_closeOnResume.delete(overlay)) closeModal({ force: true });
 }
 
 /**
@@ -757,6 +1000,8 @@ async function _askOverSuspended(ask, suspended) {
 // machen, damit die nachfolgende Schließ-Logik es regulär abräumt. Der geparkte
 // Fokus kommt mit, sonst läuft der Focus-Restore in _doClose ins Leere.
 function _discardSuspendedModal({ overlay, restoreFocus }) {
+  // Geht ohnehin zu - ein gemerktes spaetes Schliessen ist damit erledigt.
+  _closeOnResume.delete(overlay);
   // Auch der Weg nach draußen hebt inert auf: das Overlay durchläuft noch die
   // reguläre Schließ-Logik samt Animation und soll dabei kein Sonderzustand sein.
   overlay.inert = false;
@@ -1196,7 +1441,7 @@ function _doClose(overlayEl) {
   const target = overlayEl ?? activeOverlay;
   if (!target) return;
 
-  target.remove();
+  _removeOverlay(target);
 
   // Globalen State nur zurücksetzen wenn kein neues Modal zwischenzeitlich geöffnet wurde.
   if (activeOverlay === target) {
@@ -1220,7 +1465,10 @@ function _doClose(overlayEl) {
     // hier nicht mehr stehen - das Overlay ist schon entfernt, der Browser hat
     // ihn auf <body> fallen lassen.
     const aktiv = document.activeElement;
-    if (aktiv && aktiv !== document.body && aktiv !== document.documentElement && !target.contains?.(aktiv)) {
+    // Den Fokus, den der Browser beim `close()` selbst zurueckgab, hat kein
+    // Aufrufer gesetzt - er zaehlt nicht als dessen Wahl (siehe _leaveTopLayer).
+    const vomBrowser = Boolean(aktiv) && aktiv === target._nativeRestored;
+    if (aktiv && !vomBrowser && aktiv !== document.body && aktiv !== document.documentElement && !target.contains?.(aktiv)) {
       if (window.yuvomi?.restoreThemeColor) window.yuvomi.restoreThemeColor();
       _releaseCloseWaiters(target);
       return;
@@ -1597,9 +1845,8 @@ export function openModal({
     : '';
 
   const html = `
-    <div class="modal-overlay" id="shared-modal-overlay" aria-label="${t('modal.overlayLabel')}">
-      <div class="modal-panel${sizeClass}" role="dialog" aria-modal="true"
-           aria-labelledby="shared-modal-title">
+    <dialog class="modal-overlay" id="shared-modal-overlay" aria-labelledby="shared-modal-title">
+      <div class="modal-panel${sizeClass}">
         <div class="modal-panel__header">
           <h2 class="modal-panel__title" id="shared-modal-title">${esc(title)}</h2>
           <div class="modal-panel__header-actions">
@@ -1613,12 +1860,14 @@ export function openModal({
           ${content}
         </div>
       </div>
-    </div>`;
+    </dialog>`;
 
   _modalGeneration += 1;
   document.body.insertAdjacentHTML('beforeend', html);
   activeOverlay = document.getElementById('shared-modal-overlay');
   activeOverlay._onCloseCallback = onClose;
+  activeOverlay.addEventListener('cancel', _onCancel);
+  activeOverlay.addEventListener('close', _onNativeClose);
 
   // VOR JEDEM ANDEREN LISTENER AUF DIESEM KNOTEN: die Totzeit schluckt einen
   // Zeigerklick, der noch zum Öffnen gehört, und ihre Reihenfolge entscheidet
@@ -1639,6 +1888,15 @@ export function openModal({
   const panel = activeOverlay.querySelector('.modal-panel');
 
   mountFooter(panel);
+
+  // IN DIE TOP-LAYER, BEVOR DER ERSTFOKUS GEPLANT WIRD (D7). `showModal()`
+  // fokussiert synchron das erste Bedienelement (das Schliessen-X); trapFocus
+  // merkt diesen Stand als "beim Planen" und setzt 50 ms spaeter den
+  // eigentlichen Einstieg (erstes Feld). Ab hier ist der Hintergrund inert:
+  // Tab verlaesst den Dialog nicht mehr, Screenreader lesen die Seite
+  // dahinter nicht mit.
+  _enterTopLayer(activeOverlay);
+  if (_reducedMotion()) _fade(activeOverlay, 0, 1);
 
   // Kopf-Aktion verdrahten: der Listener ruft immer den aktuell hinterlegten
   // Callback, damit updateHeaderAction() ihn später tauschen kann, ohne den
@@ -1699,8 +1957,7 @@ export function openModal({
   });
 
   // Escape (nur einmal binden)
-  document.removeEventListener('keydown', onEscape);
-  document.addEventListener('keydown', onEscape);
+  bindEscape();
 
   // Callback für Aufrufer
   if (typeof onSave === 'function') onSave(panel);
@@ -1732,13 +1989,43 @@ export function openModal({
 // --------------------------------------------------------
 
 /**
+ * EIN SPAETER ABLAUF SCHLIESST NUR SEINEN EIGENEN DIALOG (#1997). Es gibt einen
+ * einzigen Modal-Slot, und `closeModal()` ohne Weiteres schliesst, was gerade
+ * darin liegt. Wer erst nach einem `await` schliesst (Speichern kam an,
+ * Verknuepfen ist durch), trifft so den Dialog, den der Nutzer INZWISCHEN
+ * geoeffnet hat - samt allem, was er dort schon eingetippt hat, denn
+ * `force: true` fragt nicht nach. Deshalb haelt der Aufrufer VOR der Anfrage
+ * `captureModalContext()` fest und reicht es hier als `context` herein:
+ * geschlossen wird nur, wenn noch genau dieser Dialog im Slot liegt.
+ *
+ * Verglichen wird der Overlay-Knoten, nicht die Generation und nicht die
+ * Route. Die Generation zaehlt jedes openModal(), auch die Rueckfrage
+ * „Aenderungen verwerfen?", die den Dialog nur parkt und ihn danach als
+ * DENSELBEN Knoten zurueckgibt - sein Erfolg muesste ihn weiter schliessen
+ * duerfen. Ein neu geoeffneter Dialog ist dagegen immer ein neuer Knoten, auch
+ * wenn er dieselbe Maske zeigt. Die Seite spielt fuer das Schliessen keine
+ * Rolle: liegt der eigene Dialog noch offen, ist Schliessen richtig, gleich
+ * was die Seite darunter inzwischen neu gezeichnet hat.
+ *
+ * @param {{ force?: boolean, context?: ReturnType<typeof captureModalContext> | null }} [options]
  * @returns {Promise<boolean>} ob der Dialog wirklich zugeht. `false` heisst
  *   ausschliesslich: der Nutzer hat das Verwerfen ungespeicherter Aenderungen
  *   abgelehnt, das Modal bleibt offen. Die Zurueck-Geste braucht diese
  *   Unterscheidung (#871) - ohne sie verloere ein abgelehntes Schliessen den
- *   History-Marker, und die naechste Geste fuehre aus der Seite heraus.
+ *   History-Marker, und die naechste Geste fuehre aus der Seite heraus. Ist
+ *   der Dialog aus `context` schon weg, ist das ebenfalls `true`: er ist zu,
+ *   und der Dialog, der jetzt offen ist, geht diesen Aufrufer nichts an.
  */
-export async function closeModal({ force = false } = {}) {
+export async function closeModal({ force = false, context = null } = {}) {
+  if (context && !isOwnModalOpen(context)) {
+    // Geparkt statt ersetzt: der eigene Dialog liegt unter einer Rueckfrage
+    // („Aenderungen verwerfen?") und kommt bei „Abbrechen" zurueck. Ihn jetzt
+    // zu schliessen, schloesse die Rueckfrage; ihn stehen zu lassen, liesse
+    // einen schon gespeicherten Dialog offen (Speichern-Knopf noch gesperrt).
+    // Also merken - _resumeSuspendedModal schliesst ihn, sobald er zurueck ist.
+    if (_isParked(context.overlay)) _closeOnResume.add(context.overlay);
+    return true;
+  }
   // Bereits im Schließ-Lauf? Erneute Aufrufe (z.B. schnelles Doppel-Schließen,
   // Hardware-Back) ignorieren - der Dialog geht ohnehin zu, also `true`.
   if (!activeOverlay || modalState === 'closing') return true;
@@ -1782,7 +2069,7 @@ export async function closeModal({ force = false } = {}) {
   // ihn wieder anhaben, wenn es nichts anderes sagt.
   _dirtyGuardEnabled = true;
 
-  document.removeEventListener('keydown', onEscape);
+  unbindEscape();
 
   const capturedOverlay = activeOverlay;
   const panel = capturedOverlay.querySelector('.modal-panel');
@@ -1808,14 +2095,29 @@ export async function closeModal({ force = false } = {}) {
   // fuer den Fall, dass das Ende doch ausbleibt (verdeckter Tab, abgehaengter
   // Knoten).
   //
-  // Unter reduzierter Bewegung gibt es keinen Ausgang, also auch kein Warten:
-  // die Regeln setzen die Animation dort auf `none`, und ein `animationend`
-  // kaeme nie.
-  const reduceMotion = typeof matchMedia === 'function'
-    && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // Unter reduzierter Bewegung BLENDET DAS MODAL AUS statt hart zu schneiden
+  // (Critique 2026-10-16, siehe _fade). Ohne Web Animations (Sonden ohne
+  // Layout) geht der Knoten sofort; ein Netz faengt eine Blende, die nie endet.
+  const reduceMotion = _reducedMotion();
+  if (panel) {
+    capturedOverlay.classList.add('modal-overlay--closing');
+    // Ab hier ist die Seite wieder bedienbar, der Knoten blendet nur noch aus.
+    _leaveTopLayer(capturedOverlay);
+  }
+  const blende = panel && reduceMotion ? _fade(capturedOverlay, 1, 0) : null;
+  if (blende) {
+    let fertig = false;
+    const abraeumen = () => {
+      if (fertig) return;
+      fertig = true;
+      _doClose(capturedOverlay);
+    };
+    setTimeout(abraeumen, MODAL_EXIT_FALLBACK_MS);
+    blende.finished.then(abraeumen, abraeumen);
+    return true;
+  }
   if (panel && !reduceMotion) {
     panel.classList.add('modal-panel--closing');
-    capturedOverlay.classList.add('modal-overlay--closing');
     // _doClose setzt modalState auf 'idle', sobald der Overlay final entfernt wird.
     const fallback = setTimeout(() => {
       panel.removeEventListener('animationend', onExitEnd);
